@@ -111,6 +111,19 @@ export async function bundleFiles(files: Record<string, FileNode>): Promise<Bund
     // Create a virtual file system for esbuild
     const allFiles = [...jsxFiles, ...jsFiles];
 
+    // Read package.json FIRST to get installed dependencies
+    const packageJsonNode = files['package.json'];
+    let packageVersions: Record<string, string> = {};
+
+    if (packageJsonNode && packageJsonNode.type === 'file' && packageJsonNode.content) {
+      try {
+        const packageJson = JSON.parse(packageJsonNode.content);
+        packageVersions = packageJson.dependencies || {};
+      } catch (error) {
+        console.error('Failed to parse package.json:', error);
+      }
+    }
+
     // Helper to detect if file contains JSX
     const containsJSX = (content: string) => {
       return /<[A-Z][a-zA-Z0-9]*[\s/>]/.test(content) || /<[a-z]+[\s/>]/.test(content);
@@ -125,6 +138,11 @@ export async function bundleFiles(files: Record<string, FileNode>): Promise<Bund
       return 'js';
     };
 
+    // Check if Material UI or Emotion is used
+    const usesMui = Object.keys(packageVersions).some(pkg =>
+      pkg.includes('@mui') || pkg.includes('@emotion')
+    );
+
     // Build with esbuild
     const result = await esbuild.build({
       stdin: {
@@ -137,7 +155,7 @@ export async function bundleFiles(files: Record<string, FileNode>): Promise<Bund
       write: false,
       format: 'esm',
       jsx: 'automatic',
-      jsxImportSource: 'react',
+      jsxImportSource: usesMui ? '@emotion/react' : 'react',
       plugins: [
         {
           name: 'virtual-fs',
@@ -218,23 +236,10 @@ export async function bundleFiles(files: Record<string, FileNode>): Promise<Bund
     // Build import map for external dependencies
     const externalPackages = new Set<string>();
 
-    // Read package.json to get installed dependencies
-    const packageJsonNode = files['package.json'];
-    let packageVersions: Record<string, string> = {};
-
-    if (packageJsonNode && packageJsonNode.type === 'file' && packageJsonNode.content) {
-      try {
-        const packageJson = JSON.parse(packageJsonNode.content);
-        packageVersions = packageJson.dependencies || {};
-
-        // Add all dependencies from package.json
-        Object.keys(packageVersions).forEach(pkg => {
-          externalPackages.add(pkg);
-        });
-      } catch (error) {
-        console.error('Failed to parse package.json:', error);
-      }
-    }
+    // Add all dependencies from package.json
+    Object.keys(packageVersions).forEach(pkg => {
+      externalPackages.add(pkg);
+    });
 
     // Extract imports from all files
     const importRegex = /import\s+(?:(?:[\w*\s{},]*)\s+from\s+)?['"]([^'"]+)['"]/g;
@@ -243,8 +248,19 @@ export async function bundleFiles(files: Record<string, FileNode>): Promise<Bund
       while ((match = importRegex.exec(file.content)) !== null) {
         const pkg = match[1];
         if (!pkg.startsWith('.') && !pkg.startsWith('/') && !pkg.endsWith('.css')) {
-          const basePkg = pkg.split('/')[0];
-          externalPackages.add(basePkg);
+          // For scoped packages like @mui/material, use the full scope
+          // For regular packages, use just the base name
+          if (pkg.startsWith('@')) {
+            // Get @scope/package (e.g., @mui/material from @mui/material/Button)
+            const parts = pkg.split('/');
+            if (parts.length >= 2) {
+              const scopedPkg = `${parts[0]}/${parts[1]}`;
+              externalPackages.add(scopedPkg);
+            }
+          } else {
+            const basePkg = pkg.split('/')[0];
+            externalPackages.add(basePkg);
+          }
         }
       }
     });
@@ -255,35 +271,85 @@ export async function bundleFiles(files: Record<string, FileNode>): Promise<Bund
       externalPackages.add('react-dom');
     }
 
-    // Build import map
+    // Build import map using esm.sh with proper external handling
+    // This ensures single React instance by telling esm.sh NOT to bundle React separately
     const imports: Record<string, string> = {};
+
+    const reactVersion = packageVersions['react']?.replace(/^\^/, '');
+    const reactDomVersion = packageVersions['react-dom']?.replace(/^\^/, '');
+
+    // First, add React and React-DOM WITHOUT external params (they are the base)
+    if (reactVersion) {
+      imports['react'] = `https://esm.sh/react@${reactVersion}`;
+      imports['react/jsx-runtime'] = `https://esm.sh/react@${reactVersion}/jsx-runtime`;
+      imports['react/jsx-dev-runtime'] = `https://esm.sh/react@${reactVersion}/jsx-dev-runtime`;
+    }
+    if (reactDomVersion) {
+      imports['react-dom'] = `https://esm.sh/react-dom@${reactDomVersion}`;
+      imports['react-dom/client'] = `https://esm.sh/react-dom@${reactDomVersion}/client`;
+    }
+
+    // Now add all OTHER packages WITH ?external=react,react-dom parameter
+    // This tells esm.sh to use the React from the import map, not bundle its own
     externalPackages.forEach((pkg) => {
-      // Use specific version from package.json if available, otherwise use latest
+      // Skip react and react-dom as they're already added
+      if (pkg === 'react' || pkg === 'react-dom') {
+        return;
+      }
+
       const version = packageVersions[pkg];
-      const packageUrl = version
-        ? `https://esm.sh/${pkg}@${version.replace(/^\^/, '')}`
-        : `https://esm.sh/${pkg}`;
+      const versionStr = version?.replace(/^\^/, '') || '';
+
+      // For packages that depend on React, add external parameter
+      let packageUrl: string;
+      if (versionStr) {
+        packageUrl = `https://esm.sh/${pkg}@${versionStr}?external=react,react-dom`;
+      } else {
+        packageUrl = `https://esm.sh/${pkg}?external=react,react-dom`;
+      }
 
       imports[pkg] = packageUrl;
 
-      // Add sub-paths for common packages
-      if (pkg === 'react') {
-        const reactVersion = version?.replace(/^\^/, '') || '';
-        const reactBase = reactVersion ? `https://esm.sh/react@${reactVersion}` : 'https://esm.sh/react';
-        imports['react/jsx-runtime'] = `${reactBase}/jsx-runtime`;
-        imports['react/jsx-dev-runtime'] = `${reactBase}/jsx-dev-runtime`;
-      }
-      if (pkg === 'react-dom') {
-        const reactDomVersion = version?.replace(/^\^/, '') || '';
-        const reactDomBase = reactDomVersion ? `https://esm.sh/react-dom@${reactDomVersion}` : 'https://esm.sh/react-dom';
-        imports['react-dom/client'] = `${reactDomBase}/client`;
-      }
+      // NO wildcards needed - we use named imports from main package
+      // e.g., import { Button } from '@mui/material' instead of import Button from '@mui/material/Button'
     });
+
+    // Emotion JSX runtime (also needs external param)
+    const emotionReactVersion = packageVersions['@emotion/react']?.replace(/^\^/, '');
+    if (emotionReactVersion) {
+      imports['@emotion/react/jsx-runtime'] = `https://esm.sh/@emotion/react@${emotionReactVersion}/jsx-runtime?external=react,react-dom`;
+      imports['@emotion/react/jsx-dev-runtime'] = `https://esm.sh/@emotion/react@${emotionReactVersion}/jsx-dev-runtime?external=react,react-dom`;
+    }
 
     const importMap = Object.keys(imports).length > 0 ? `
 <script type="importmap">
 ${JSON.stringify({ imports }, null, 2)}
 </script>` : '';
+
+    // Check if Emotion is being used
+    const hasEmotion = Object.keys(externalPackages).some(pkg => pkg.includes('@emotion'));
+
+    // Emotion runtime polyfill for CSS-in-JS
+    const emotionPolyfill = `
+<script>
+// Emotion runtime polyfill - needed for Material UI v5+ styling
+if (typeof global === 'undefined') {
+  window.global = window;
+}
+if (typeof process === 'undefined') {
+  window.process = { env: { NODE_ENV: 'development' } };
+}
+${hasEmotion ? `
+// CRITICAL: Ensure document.head is available for Emotion style injection
+// Material UI v5+ uses Emotion which injects styles dynamically
+if (typeof document !== 'undefined') {
+  // Emotion will create its own cache and inject styles here
+  // Just ensure the environment is ready
+  console.log('[Emotion] Runtime environment ready for style injection');
+  console.log('[Emotion] document.head available:', !!document.head);
+}
+` : ''}
+</script>`;
 
     // Console interceptor
     const consoleInterceptor = `
@@ -342,7 +408,12 @@ ${JSON.stringify({ imports }, null, 2)}
       finalHTML = finalHTML.replace("</head>", `${importMap}\n</head>`);
     }
 
-    // 2. Inject CSS
+    // 2. Inject Emotion polyfill (must come before any module code)
+    if (finalHTML.includes("</head>")) {
+      finalHTML = finalHTML.replace("</head>", `${emotionPolyfill}\n</head>`);
+    }
+
+    // 3. Inject CSS
     if (combinedCSS) {
       const styleTag = `<style>\n${combinedCSS}\n</style>`;
       if (finalHTML.includes("</head>")) {
@@ -352,7 +423,7 @@ ${JSON.stringify({ imports }, null, 2)}
       }
     }
 
-    // 3. Inject console interceptor
+    // 4. Inject console interceptor
     if (finalHTML.includes("</head>")) {
       finalHTML = finalHTML.replace("</head>", `${consoleInterceptor}\n</head>`);
     } else if (finalHTML.includes("<body>")) {
@@ -361,7 +432,7 @@ ${JSON.stringify({ imports }, null, 2)}
       finalHTML = consoleInterceptor + "\n" + finalHTML;
     }
 
-    // 4. Inject bundled JS
+    // 5. Inject bundled JS
     if (bundledJS) {
       const scriptTag = `<script type="module">\n${bundledJS}\n</script>`;
       if (finalHTML.includes("</body>")) {

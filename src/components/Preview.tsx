@@ -9,6 +9,9 @@ export const Preview: React.FC = () => {
   const [consoleMessages, setConsoleMessages] = useState<ConsoleMessage[]>([]);
   const [isConsoleExpanded, setIsConsoleExpanded] = useState(true);
   const [lastUpdate, setLastUpdate] = useState(0);
+  const [iframeKey, setIframeKey] = useState(0);
+  const [htmlContent, setHtmlContent] = useState('');
+  const [isTransitioning, setIsTransitioning] = useState(false);
   const debounceTimerRef = useRef<NodeJS.Timeout>();
   const { files } = useFileSystemStore();
 
@@ -48,18 +51,21 @@ export const Preview: React.FC = () => {
         return;
       }
 
-      if (iframeRef.current) {
-        const iframe = iframeRef.current;
-        const doc = iframe.contentDocument || iframe.contentWindow?.document;
+      // Smooth transition: fade out → update → fade in
+      setIsTransitioning(true);
 
-        if (doc) {
-          doc.open();
-          doc.write(result.html);
-          doc.close();
-        }
-      }
+      // Wait for fade out animation
+      setTimeout(() => {
+        // Force iframe recreation by updating key - this ensures Emotion cache starts fresh
+        setIframeKey((prev) => prev + 1);
+        setHtmlContent(result.html);
+        setLastUpdate(Date.now());
 
-      setLastUpdate(Date.now());
+        // Fade back in after a brief moment
+        setTimeout(() => {
+          setIsTransitioning(false);
+        }, 50);
+      }, 150);
     } catch (error) {
       setConsoleMessages((prev) => [
         ...prev,
@@ -70,6 +76,7 @@ export const Preview: React.FC = () => {
           timestamp: Date.now(),
         },
       ]);
+      setIsTransitioning(false);
     }
   }, [files]);
 
@@ -135,10 +142,14 @@ export const Preview: React.FC = () => {
         } bg-white overflow-hidden`}
       >
         <iframe
+          key={iframeKey}
           ref={iframeRef}
           title="preview"
+          srcDoc={htmlContent}
           sandbox="allow-scripts allow-same-origin allow-forms allow-modals"
-          className="w-full h-full border-0"
+          className={`w-full h-full border-0 transition-opacity duration-150 ${
+            isTransitioning ? "opacity-0" : "opacity-100"
+          }`}
         />
       </div>
 

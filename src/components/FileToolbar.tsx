@@ -1,15 +1,17 @@
 import React, { useState } from 'react';
 import { VscNewFile, VscNewFolder, VscTrash, VscEdit, VscPackage } from 'react-icons/vsc';
 import { useFileSystemStore } from '../store/fileSystemStore';
-import { PackageManager } from './PackageManager';
 
-export const FileToolbar: React.FC = () => {
+interface FileToolbarProps {
+  onToggleDependencies: () => void;
+}
+
+export const FileToolbar: React.FC<FileToolbarProps> = ({ onToggleDependencies }) => {
   const { activeFilePath, createFile, createFolder, deleteNode, renameNode } =
     useFileSystemStore();
   const [showNewFileInput, setShowNewFileInput] = useState(false);
   const [showNewFolderInput, setShowNewFolderInput] = useState(false);
   const [showRenameInput, setShowRenameInput] = useState(false);
-  const [showPackageManager, setShowPackageManager] = useState(false);
   const [inputValue, setInputValue] = useState('');
 
   const handleCreateFile = () => {
@@ -110,19 +112,14 @@ export const FileToolbar: React.FC = () => {
 
         <div className="ml-auto">
           <button
-            onClick={() => setShowPackageManager(true)}
+            onClick={onToggleDependencies}
             className="p-1.5 hover:bg-gray-700 rounded transition-colors"
-            title="Package Manager"
+            title="Toggle Dependencies"
           >
             <VscPackage className="w-4 h-4 text-gray-300" />
           </button>
         </div>
       </div>
-
-      <PackageManager
-        isOpen={showPackageManager}
-        onClose={() => setShowPackageManager(false)}
-      />
 
       {showNewFileInput && (
         <div className="mt-2">
