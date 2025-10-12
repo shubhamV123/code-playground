@@ -1,5 +1,6 @@
 import * as esbuild from 'esbuild-wasm';
 import { type FileNode } from "../types/fileSystem";
+import { getResolver } from "./resolvers";
 
 export interface BundleResult {
   html: string;
@@ -271,55 +272,10 @@ export async function bundleFiles(files: Record<string, FileNode>): Promise<Bund
       externalPackages.add('react-dom');
     }
 
-    // Build import map using esm.sh with proper external handling
-    // This ensures single React instance by telling esm.sh NOT to bundle React separately
-    const imports: Record<string, string> = {};
-
-    const reactVersion = packageVersions['react']?.replace(/^\^/, '');
-    const reactDomVersion = packageVersions['react-dom']?.replace(/^\^/, '');
-
-    // First, add React and React-DOM WITHOUT external params (they are the base)
-    if (reactVersion) {
-      imports['react'] = `https://esm.sh/react@${reactVersion}`;
-      imports['react/jsx-runtime'] = `https://esm.sh/react@${reactVersion}/jsx-runtime`;
-      imports['react/jsx-dev-runtime'] = `https://esm.sh/react@${reactVersion}/jsx-dev-runtime`;
-    }
-    if (reactDomVersion) {
-      imports['react-dom'] = `https://esm.sh/react-dom@${reactDomVersion}`;
-      imports['react-dom/client'] = `https://esm.sh/react-dom@${reactDomVersion}/client`;
-    }
-
-    // Now add all OTHER packages WITH ?external=react,react-dom parameter
-    // This tells esm.sh to use the React from the import map, not bundle its own
-    externalPackages.forEach((pkg) => {
-      // Skip react and react-dom as they're already added
-      if (pkg === 'react' || pkg === 'react-dom') {
-        return;
-      }
-
-      const version = packageVersions[pkg];
-      const versionStr = version?.replace(/^\^/, '') || '';
-
-      // For packages that depend on React, add external parameter
-      let packageUrl: string;
-      if (versionStr) {
-        packageUrl = `https://esm.sh/${pkg}@${versionStr}?external=react,react-dom`;
-      } else {
-        packageUrl = `https://esm.sh/${pkg}?external=react,react-dom`;
-      }
-
-      imports[pkg] = packageUrl;
-
-      // NO wildcards needed - we use named imports from main package
-      // e.g., import { Button } from '@mui/material' instead of import Button from '@mui/material/Button'
-    });
-
-    // Emotion JSX runtime (also needs external param)
-    const emotionReactVersion = packageVersions['@emotion/react']?.replace(/^\^/, '');
-    if (emotionReactVersion) {
-      imports['@emotion/react/jsx-runtime'] = `https://esm.sh/@emotion/react@${emotionReactVersion}/jsx-runtime?external=react,react-dom`;
-      imports['@emotion/react/jsx-dev-runtime'] = `https://esm.sh/@emotion/react@${emotionReactVersion}/jsx-dev-runtime?external=react,react-dom`;
-    }
+    // Use resolver factory to build import map
+    // Automatically selects the right resolver based on installed packages
+    const resolver = getResolver(packageVersions);
+    const { imports } = resolver(packageVersions, externalPackages);
 
     const importMap = Object.keys(imports).length > 0 ? `
 <script type="importmap">

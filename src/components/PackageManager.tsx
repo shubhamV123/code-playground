@@ -158,9 +158,9 @@ export const PackageManager: React.FC<PackageManagerProps> = ({
   };
 
   return (
-    <div className={`flex flex-col bg-[#1e1e1e] border-t border-gray-700 ${isExpanded ? 'h-full' : ''}`}>
+    <div className={`flex flex-col bg-gray-900 border-t border-gray-700 ${isExpanded ? 'h-full' : ''}`}>
       {/* Header */}
-      <div className="flex items-center justify-between px-3 py-2 bg-[#252526] border-b border-gray-700">
+      <div className="flex items-center justify-between px-3 py-2 bg-gray-800 border-b border-gray-700">
         <div className="flex items-center gap-2">
           <button
             onClick={onToggle}
@@ -228,7 +228,7 @@ export const PackageManager: React.FC<PackageManagerProps> = ({
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Search packages..."
-                className="w-full bg-[#3c3c3c] text-gray-100 pl-8 pr-3 py-1.5 rounded text-xs border border-gray-600 focus:outline-none focus:border-blue-500 focus:bg-[#2d2d30]"
+                className="w-full bg-gray-800 text-gray-100 pl-8 pr-3 py-1.5 rounded text-xs border border-gray-600 focus:outline-none focus:border-blue-500 focus:bg-gray-700"
               />
             </div>
           </div>
@@ -252,7 +252,7 @@ export const PackageManager: React.FC<PackageManagerProps> = ({
                 {Object.entries(installedPackages).map(([name, version]) => (
                   <div
                     key={name}
-                    className="flex items-center justify-between group hover:bg-[#2d2d30] px-2 py-1.5 rounded cursor-pointer"
+                    className="flex items-center justify-between group hover:bg-gray-800/50 px-2 py-1.5 rounded cursor-pointer"
                   >
                     <div className="flex-1 min-w-0">
                       <p className="text-xs font-medium text-gray-200 truncate">
@@ -284,7 +284,7 @@ export const PackageManager: React.FC<PackageManagerProps> = ({
 
               {!isSearching && searchResults.length > 0 && (
                 <div>
-                  <div className="px-3 py-2 bg-[#252526] border-b border-gray-700">
+                  <div className="px-3 py-2 bg-gray-800 border-b border-gray-700">
                     <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wide">
                       Search Results
                     </h3>
@@ -299,7 +299,7 @@ export const PackageManager: React.FC<PackageManagerProps> = ({
                       return (
                         <div
                           key={result.package.name}
-                          className="hover:bg-[#2d2d30] rounded transition-colors"
+                          className="hover:bg-gray-800/50 rounded transition-colors"
                         >
                           <div className="flex items-start justify-between px-2 py-2">
                             <div className="flex-1 min-w-0 pr-2">
@@ -360,7 +360,7 @@ export const PackageManager: React.FC<PackageManagerProps> = ({
                                           [result.package.name]: e.target.value,
                                         })
                                       }
-                                      className="w-full bg-[#3c3c3c] text-gray-100 px-2 py-1 rounded border border-gray-600 focus:outline-none focus:border-blue-500 text-[10px]"
+                                      className="w-full bg-gray-800 text-gray-100 px-2 py-1 rounded border border-gray-600 focus:outline-none focus:border-blue-500 text-[10px]"
                                     >
                                       {versions.map((version) => (
                                         <option key={version} value={version}>
@@ -389,7 +389,7 @@ export const PackageManager: React.FC<PackageManagerProps> = ({
                                     </button>
                                     <button
                                       onClick={() => setExpandedPackage(null)}
-                                      className="px-2 py-1 bg-[#3c3c3c] hover:bg-[#505050] text-gray-300 text-[10px] rounded transition-colors font-medium"
+                                      className="px-2 py-1 bg-gray-700 hover:bg-gray-600 text-gray-300 text-[10px] rounded transition-colors font-medium"
                                     >
                                       Cancel
                                     </button>

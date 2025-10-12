@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
-import { VscNewFile, VscNewFolder, VscTrash, VscEdit, VscPackage } from 'react-icons/vsc';
+import { VscNewFile, VscNewFolder, VscTrash, VscEdit, VscPackage, VscLayersActive } from 'react-icons/vsc';
 import { useFileSystemStore } from '../store/fileSystemStore';
 
 interface FileToolbarProps {
   onToggleDependencies: () => void;
+  onToggleTemplates: () => void;
 }
 
-export const FileToolbar: React.FC<FileToolbarProps> = ({ onToggleDependencies }) => {
+export const FileToolbar: React.FC<FileToolbarProps> = ({ onToggleDependencies, onToggleTemplates }) => {
   const { activeFilePath, createFile, createFolder, deleteNode, renameNode } =
     useFileSystemStore();
   const [showNewFileInput, setShowNewFileInput] = useState(false);
@@ -110,7 +111,14 @@ export const FileToolbar: React.FC<FileToolbarProps> = ({ onToggleDependencies }
           <VscTrash className="w-4 h-4 text-gray-300" />
         </button>
 
-        <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-2">
+          <button
+            onClick={onToggleTemplates}
+            className="p-1.5 hover:bg-gray-700 rounded transition-colors"
+            title="Choose Template"
+          >
+            <VscLayersActive className="w-4 h-4 text-gray-300" />
+          </button>
           <button
             onClick={onToggleDependencies}
             className="p-1.5 hover:bg-gray-700 rounded transition-colors"
