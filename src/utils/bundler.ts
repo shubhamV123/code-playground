@@ -130,7 +130,7 @@ export async function bundleFiles(
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="script-src 'self' 'unsafe-inline' 'unsafe-eval' https://esm.sh https://cdn.jsdelivr.net https://ga.jspm.io blob:; style-src 'self' 'unsafe-inline'; default-src 'self' 'unsafe-inline' https:">
+  <meta http-equiv="Content-Security-Policy" content="script-src 'self' 'unsafe-inline' 'unsafe-eval' https://esm.sh https://cdn.jsdelivr.net https://ga.jspm.io data:; style-src 'self' 'unsafe-inline'; default-src 'self' 'unsafe-inline' https: data:">
   <title>Preview</title>
 </head>
 <body>
@@ -143,26 +143,31 @@ export async function bundleFiles(
 
     // Add HMR transition CSS to minimize perceived flicker
     const hmrTransitionCSS = `
-/* HMR Transition: Eliminate flicker with smooth opacity transition */
+/* HMR Transition: Zero-flicker updates */
 #root {
-  transition: opacity 0.08s ease-in-out;
   min-height: 100vh;
+  position: relative;
 }
 
-/* When root is being updated, maintain opacity to prevent flash */
+/* When root is being updated, maintain content to prevent flash */
 #root:empty {
   opacity: 1;
   background-color: inherit;
 }
 
-/* Smooth fade-in for new content */
-@keyframes fadeIn {
-  from { opacity: 0.9; }
-  to { opacity: 1; }
+/* Hide old roots during cleanup (prevents seeing duplicates) */
+#root > *:not(:last-child) {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+  z-index: -1;
 }
 
-#root > * {
-  animation: fadeIn 0.1s ease-in;
+/* Ensure new content is visible */
+#root > *:last-child {
+  position: relative;
+  opacity: 1;
+  z-index: 1;
 }
 `;
 
@@ -451,7 +456,8 @@ ${
   // HOT MODULE RELOAD: Listen for new code AND CSS from parent
   console.log('[Iframe] 🎧 HMR listener installed and ready');
 
-  // Track module revision to prevent race conditions
+  // Store the React root to avoid recreating it
+  let reactRoot = null;
   let currentModuleRevision = 0;
   let isUpdating = false;
 
@@ -459,7 +465,7 @@ ${
     if (event.data.type === 'hot-module-reload') {
       // Prevent overlapping updates
       if (isUpdating) {
-        console.log('[Iframe] ⏸️ Update already in progress, queuing...');
+        console.log('[Iframe] ⏸️ Update already in progress, skipping...');
         return;
       }
 
@@ -492,28 +498,46 @@ ${
 
         const root = document.getElementById('root');
         if (!root) {
+          console.error('[Iframe] ❌ Root element not found');
           isUpdating = false;
           return;
         }
 
-        // Create a module blob and import it
-        const moduleBlob = new Blob([newCode], { type: 'application/javascript' });
-        const moduleUrl = URL.createObjectURL(moduleBlob);
+        // DON'T clear innerHTML - let React handle the transition
+        // This prevents the blank screen flash
 
-        // Clear the root immediately before importing
-        // This ensures React creates a clean root
-        root.innerHTML = '';
+        // Use data: URL instead of blob: URL to avoid CSP issues
+        // Convert to base64 efficiently
+        const utf8Bytes = new TextEncoder().encode(newCode);
+        let binaryString = '';
+        for (let i = 0; i < utf8Bytes.length; i++) {
+          binaryString += String.fromCharCode(utf8Bytes[i]);
+        }
+        const base64Code = btoa(binaryString);
+        const dataUrl = 'data:text/javascript;base64,' + base64Code;
 
-        // Import and execute the new module
-        import(moduleUrl)
+        // Import and execute the new module using data: URL
+        import(dataUrl)
           .then(() => {
-            console.log('[Iframe] ✅ HMR update complete - SMOOTH, NO NETWORK REQUESTS, NO FLICKER');
-            URL.revokeObjectURL(moduleUrl);
+            console.log('[Iframe] ✅ HMR update complete - NO NETWORK REQUESTS, NO FLICKER, CSP-SAFE');
             isUpdating = false;
+
+            // Clean up old React roots if there are duplicates
+            setTimeout(() => {
+              const rootChildren = root.children;
+              if (rootChildren.length > 1) {
+                console.log('[Iframe] 🧹 Cleaning up', rootChildren.length - 1, 'duplicate roots');
+                // Remove all but the last child (newest render)
+                while (rootChildren.length > 1) {
+                  root.removeChild(rootChildren[0]);
+                }
+              }
+            }, 100);
           })
           .catch((error) => {
             console.error('[Iframe] ❌ Hot module reload failed:', error);
-            URL.revokeObjectURL(moduleUrl);
+            // On error, clear and let next update try again
+            root.innerHTML = '';
             isUpdating = false;
           });
       } catch (error) {
@@ -528,8 +552,8 @@ ${
     // Inject everything into HTML
     let finalHTML = baseHTML;
 
-    // 0. Inject CSP meta tag to allow blob: URLs for HMR (MUST be first)
-    const cspMetaTag = `<meta http-equiv="Content-Security-Policy" content="script-src 'self' 'unsafe-inline' 'unsafe-eval' https://esm.sh https://cdn.jsdelivr.net https://ga.jspm.io blob:; style-src 'self' 'unsafe-inline'; default-src 'self' 'unsafe-inline' https: data: blob:">`;
+    // 0. Inject CSP meta tag to allow data: URLs for HMR (MUST be first)
+    const cspMetaTag = `<meta http-equiv="Content-Security-Policy" content="script-src 'self' 'unsafe-inline' 'unsafe-eval' https://esm.sh https://cdn.jsdelivr.net https://ga.jspm.io data:; style-src 'self' 'unsafe-inline'; default-src 'self' 'unsafe-inline' https: data:">`;
 
     if (finalHTML.includes("<head>")) {
       // Inject right after <head> tag to ensure it's processed first

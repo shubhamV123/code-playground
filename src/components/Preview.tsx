@@ -255,10 +255,10 @@ export const Preview: React.FC = () => {
       clearTimeout(debounceTimerRef.current);
     }
 
-    // Set new timer for 150ms debounce (fast feedback, bundle is cached at 15ms)
+    // Set new timer for 300ms debounce (prevents too many updates while typing)
     debounceTimerRef.current = setTimeout(() => {
       updatePreview();
-    }, 150);
+    }, 300);
 
     return () => {
       if (debounceTimerRef.current) {
@@ -281,7 +281,7 @@ export const Preview: React.FC = () => {
   const toggleConsole = () => {
     setIsConsoleExpanded(!isConsoleExpanded);
   };
-  console.log({ iframeKey });
+
   return (
     <div className="h-full flex flex-col bg-gray-900">
       {/* Header */}
