@@ -63,7 +63,6 @@ const FileTreeItem: React.FC<FileTreeItemProps> = ({
 }) => {
   const { activeFilePath, setActiveFile, toggleFolder, expandedFolders, deleteNode, renameNode } =
     useFileSystemStore();
-  const [isHovered, setIsHovered] = React.useState(false);
   const [isRenaming, setIsRenaming] = React.useState(false);
   const [renameValue, setRenameValue] = React.useState(name);
   const isActive = activeFilePath === path;
@@ -141,8 +140,6 @@ const FileTreeItem: React.FC<FileTreeItemProps> = ({
         `}
         style={{ paddingLeft: `${depth * 12 + 8}px` }}
         onClick={handleClick}
-        onMouseEnter={() => setIsHovered(true)}
-        onMouseLeave={() => setIsHovered(false)}
       >
         <div className="flex items-center gap-1 flex-1 min-w-0 pr-20">
           {node.type === "folder" && (
@@ -299,7 +296,7 @@ export const FileTree: React.FC = () => {
   } | null>(null);
   const [inputValue, setInputValue] = useState("");
 
-  const handleShowContextMenu = (path: string, x: number, y: number) => {
+  const handleShowContextMenu = (path: string, x: number, _y: number) => {
     // x=0 means new file, x=1 means new folder
     if (x === 0) {
       setNewItemState({ parentPath: path, type: "file" });

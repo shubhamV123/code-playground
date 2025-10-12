@@ -61,14 +61,6 @@ export async function fetchPackageMetadata(
 }
 
 /**
- * Parses semver range and returns a compatible version
- */
-function parseVersionRange(range: string): string {
-  // Remove common prefixes
-  return range.replace(/^[\^~><=\s]*/g, '').split(/[\s|]/)[0];
-}
-
-/**
  * Checks if a version satisfies a semver range (simplified)
  */
 function satisfiesRange(version: string, range: string): boolean {
