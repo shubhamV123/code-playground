@@ -130,7 +130,6 @@ export async function bundleFiles(
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="script-src 'self' 'unsafe-inline' 'unsafe-eval' https://esm.sh https://cdn.jsdelivr.net https://ga.jspm.io data:; style-src 'self' 'unsafe-inline'; default-src 'self' 'unsafe-inline' https: data:">
   <title>Preview</title>
 </head>
 <body>
@@ -506,40 +505,42 @@ ${
         // DON'T clear innerHTML - let React handle the transition
         // This prevents the blank screen flash
 
-        // Use data: URL instead of blob: URL to avoid CSP issues
-        // Convert to base64 efficiently
-        const utf8Bytes = new TextEncoder().encode(newCode);
-        let binaryString = '';
-        for (let i = 0; i < utf8Bytes.length; i++) {
-          binaryString += String.fromCharCode(utf8Bytes[i]);
-        }
-        const base64Code = btoa(binaryString);
-        const dataUrl = 'data:text/javascript;base64,' + base64Code;
+        // Inject code as a new <script type="module"> tag
+        // This works with CSP 'unsafe-inline' and supports ES6 imports
+        try {
+          // Remove any existing HMR script tags
+          const oldScripts = document.querySelectorAll('script[data-hmr="true"]');
+          oldScripts.forEach(script => script.remove());
 
-        // Import and execute the new module using data: URL
-        import(dataUrl)
-          .then(() => {
-            console.log('[Iframe] ✅ HMR update complete - NO NETWORK REQUESTS, NO FLICKER, CSP-SAFE');
-            isUpdating = false;
+          // Create new script tag with the updated code
+          const script = document.createElement('script');
+          script.type = 'module';
+          script.setAttribute('data-hmr', 'true');
+          script.textContent = newCode;
 
-            // Clean up old React roots if there are duplicates
-            setTimeout(() => {
-              const rootChildren = root.children;
-              if (rootChildren.length > 1) {
-                console.log('[Iframe] 🧹 Cleaning up', rootChildren.length - 1, 'duplicate roots');
-                // Remove all but the last child (newest render)
-                while (rootChildren.length > 1) {
-                  root.removeChild(rootChildren[0]);
-                }
+          // Append to document head
+          document.head.appendChild(script);
+
+          console.log('[Iframe] ✅ HMR update complete - NO NETWORK REQUESTS, NO FLICKER, CSP-SAFE');
+          isUpdating = false;
+
+          // Clean up old React roots if there are duplicates
+          setTimeout(() => {
+            const rootChildren = root.children;
+            if (rootChildren.length > 1) {
+              console.log('[Iframe] 🧹 Cleaning up', rootChildren.length - 1, 'duplicate roots');
+              // Remove all but the last child (newest render)
+              while (rootChildren.length > 1) {
+                root.removeChild(rootChildren[0]);
               }
-            }, 100);
-          })
-          .catch((error) => {
-            console.error('[Iframe] ❌ Hot module reload failed:', error);
-            // On error, clear and let next update try again
-            root.innerHTML = '';
-            isUpdating = false;
-          });
+            }
+          }, 100);
+        } catch (error) {
+          console.error('[Iframe] ❌ Hot module reload failed:', error);
+          // On error, clear and let next update try again
+          root.innerHTML = '';
+          isUpdating = false;
+        }
       } catch (error) {
         console.error('[Iframe] ❌ Hot module reload error:', error);
         isUpdating = false;
@@ -551,16 +552,6 @@ ${
 
     // Inject everything into HTML
     let finalHTML = baseHTML;
-
-    // 0. Inject CSP meta tag to allow data: URLs for HMR (MUST be first)
-    const cspMetaTag = `<meta http-equiv="Content-Security-Policy" content="script-src 'self' 'unsafe-inline' 'unsafe-eval' https://esm.sh https://cdn.jsdelivr.net https://ga.jspm.io data:; style-src 'self' 'unsafe-inline'; default-src 'self' 'unsafe-inline' https: data:">`;
-
-    if (finalHTML.includes("<head>")) {
-      // Inject right after <head> tag to ensure it's processed first
-      finalHTML = finalHTML.replace("<head>", `<head>\n${cspMetaTag}`);
-    } else if (finalHTML.includes("</head>")) {
-      finalHTML = finalHTML.replace("</head>", `${cspMetaTag}\n</head>`);
-    }
 
     // 1. Inject import map
     if (importMap && finalHTML.includes("</head>")) {
