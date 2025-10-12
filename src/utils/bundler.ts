@@ -130,6 +130,7 @@ export async function bundleFiles(
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="script-src 'self' 'unsafe-inline' 'unsafe-eval' https://esm.sh https://cdn.jsdelivr.net https://ga.jspm.io blob:; style-src 'self' 'unsafe-inline'; default-src 'self' 'unsafe-inline' https:">
   <title>Preview</title>
 </head>
 <body>
@@ -526,6 +527,16 @@ ${
 
     // Inject everything into HTML
     let finalHTML = baseHTML;
+
+    // 0. Inject CSP meta tag to allow blob: URLs for HMR (MUST be first)
+    const cspMetaTag = `<meta http-equiv="Content-Security-Policy" content="script-src 'self' 'unsafe-inline' 'unsafe-eval' https://esm.sh https://cdn.jsdelivr.net https://ga.jspm.io blob:; style-src 'self' 'unsafe-inline'; default-src 'self' 'unsafe-inline' https: data: blob:">`;
+
+    if (finalHTML.includes("<head>")) {
+      // Inject right after <head> tag to ensure it's processed first
+      finalHTML = finalHTML.replace("<head>", `<head>\n${cspMetaTag}`);
+    } else if (finalHTML.includes("</head>")) {
+      finalHTML = finalHTML.replace("</head>", `${cspMetaTag}\n</head>`);
+    }
 
     // 1. Inject import map
     if (importMap && finalHTML.includes("</head>")) {
