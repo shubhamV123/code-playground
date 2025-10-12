@@ -47,12 +47,21 @@ export const Preview: React.FC = () => {
     }
   }, [htmlContent]);
 
+  // Track iframe load state
+  const iframeReadyRef = useRef(false);
+
   // Track iframe load events
   useEffect(() => {
     const iframe = iframeRef.current;
     if (!iframe) return;
 
+    // Mark as not ready when iframe is recreated
+    iframeReadyRef.current = false;
+
     const handleLoad = () => {
+      console.log("[Preview] 📺 Iframe loaded and ready for HMR");
+      iframeReadyRef.current = true;
+
       // Hide loading after a short delay to ensure content is rendered
       setTimeout(() => {
         setIsLoading(false);
@@ -115,68 +124,112 @@ export const Preview: React.FC = () => {
       if (isFirstRender.current || packagesChanged) {
         isFirstRender.current = false;
         lastPackagesRef.current = currentPackages;
+
+        if (packagesChanged) {
+          console.log(
+            "[Preview] Packages changed, full reload required (will fetch from CDN)"
+          );
+        } else {
+          console.log(
+            "[Preview] Initial load (fetching dependencies from CDN)"
+          );
+        }
+
         setIsLoading(true);
         setLoadingMessage("Loading preview...");
         setIframeKey((prev) => prev + 1);
         setHtmlContent(result.html);
         setLastUpdate(Date.now());
       } else {
-        // Hot Module Reload: Send new code AND CSS to iframe
+        // Hot Module Reload: Send new code AND CSS to iframe (no CDN calls, no flicker)
         const iframe = iframeRef.current;
+
+        console.log("[Preview] 🔍 Attempting HMR...", {
+          iframeExists: !!iframe,
+          hasContentWindow: !!iframe?.contentWindow,
+          iframeReady: iframeReadyRef.current,
+          htmlLength: result.html.length,
+        });
+
+        // Check if iframe is ready for HMR
+        if (!iframeReadyRef.current) {
+          console.warn(
+            "[Preview] ⏳ Iframe not fully loaded yet, skipping this update"
+          );
+          return;
+        }
+
         if (iframe && iframe.contentWindow) {
           try {
-            // Extract the bundled JavaScript from HTML
-            const scriptMatch = result.html.match(
-              /<script type="module">\s*const appExecutionStart[\s\S]*?<\/script>/
+            // Extract the bundled JavaScript from HTML (last script type="module" tag)
+            const scriptMatches = Array.from(
+              result.html.matchAll(
+                /<script type="module">([\s\S]*?)<\/script>/g
+              )
             );
 
-            // Extract CSS from HTML
-            const cssMatch = result.html.match(
-              /<style>\s*([\s\S]*?)\s*<\/style>/
+            // Get the LAST script tag (the app code, not the console interceptor)
+            const scriptMatch =
+              scriptMatches.length > 0
+                ? scriptMatches[scriptMatches.length - 1]
+                : null;
+
+            console.log("[Preview] 🔍 Script extraction:", {
+              totalScripts: scriptMatches.length,
+              found: !!scriptMatch,
+              scriptLength: scriptMatch ? scriptMatch[1].length : 0,
+            });
+
+            // Extract ALL CSS from HTML (handle multiple style tags)
+            const cssMatches = result.html.matchAll(
+              /<style[^>]*>\s*([\s\S]*?)\s*<\/style>/g
             );
-            const cssContent = cssMatch ? cssMatch[1] : "";
+            const cssContent = Array.from(cssMatches)
+              .map((match) => match[1])
+              .join("\n");
 
             if (scriptMatch) {
-              const scriptContent = scriptMatch[0];
-              // Extract just the app code (between performance markers)
-              const codeMatch = scriptContent.match(
-                /console\.log\('\[Iframe\] 🎯 App code execution starting\.\.\.'\);\s*([\s\S]*?)\s*\/\/ Track React render/
+              const appCode = scriptMatch[1].trim();
+
+              console.log(
+                "[Preview] ✅ HMR: Sending hot reload update (no external API calls, no flicker)"
               );
 
-              if (codeMatch) {
-                const appCode = codeMatch[1].trim();
+              // Send the new app code AND CSS to the iframe for execution
+              // NOTE: We don't access iframe.contentWindow.document to avoid cross-origin errors
+              // The message handler inside the iframe will process this
+              iframe.contentWindow.postMessage(
+                {
+                  type: "hot-module-reload",
+                  code: appCode,
+                  css: cssContent,
+                },
+                "*"
+              );
 
-                // Show brief loading for hot reload
-                setIsLoading(true);
-                setLoadingMessage("Updating...");
-
-                // Send the new app code AND CSS to the iframe for execution
-                iframe.contentWindow.postMessage(
-                  {
-                    type: "hot-module-reload",
-                    code: appCode,
-                    css: cssContent,
-                  },
-                  "*"
-                );
-
-                // Hide loading quickly for hot reload
-                setTimeout(() => setIsLoading(false), 150);
-              } else {
-                throw new Error("Could not extract app code from script");
-              }
+              setLastUpdate(Date.now());
             } else {
               throw new Error("Could not find script tag in HTML");
             }
-          } catch {
+          } catch (error) {
             // Fallback: full reload if extraction fails
+            console.error(
+              "[Preview] ⚠️ HMR extraction failed, falling back to full reload:",
+              error
+            );
+            setIsLoading(true);
+            setLoadingMessage("Reloading preview...");
+            setIframeKey((prev) => prev + 1);
             setHtmlContent(result.html);
+            setLastUpdate(Date.now());
           }
         } else {
-          // Fallback: update srcDoc if iframe not ready
-          setHtmlContent(result.html);
+          // Iframe not ready yet - skip this update, next debounce will catch it
+          console.warn(
+            "[Preview] ⏳ Iframe not ready, skipping update (will retry on next change)"
+          );
+          setLastUpdate(Date.now());
         }
-        setLastUpdate(Date.now());
       }
     } catch (error) {
       setConsoleMessages((prev) => [
@@ -228,7 +281,7 @@ export const Preview: React.FC = () => {
   const toggleConsole = () => {
     setIsConsoleExpanded(!isConsoleExpanded);
   };
-
+  console.log({ iframeKey });
   return (
     <div className="h-full flex flex-col bg-gray-900">
       {/* Header */}

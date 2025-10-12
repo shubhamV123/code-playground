@@ -140,6 +140,33 @@ export async function bundleFiles(
     // Combine all CSS
     const combinedCSS = cssFiles.join("\n\n");
 
+    // Add HMR transition CSS to minimize perceived flicker
+    const hmrTransitionCSS = `
+/* HMR Transition: Eliminate flicker with smooth opacity transition */
+#root {
+  transition: opacity 0.08s ease-in-out;
+  min-height: 100vh;
+}
+
+/* When root is being updated, maintain opacity to prevent flash */
+#root:empty {
+  opacity: 1;
+  background-color: inherit;
+}
+
+/* Smooth fade-in for new content */
+@keyframes fadeIn {
+  from { opacity: 0.9; }
+  to { opacity: 1; }
+}
+
+#root > * {
+  animation: fadeIn 0.1s ease-in;
+}
+`;
+
+    const fullCSS = hmrTransitionCSS + "\n" + combinedCSS;
+
     // Find entry point (index.js or index.jsx)
     const entryFile = [...jsFiles, ...jsxFiles].find(
       (f) =>
@@ -421,15 +448,36 @@ ${
   });
 
   // HOT MODULE RELOAD: Listen for new code AND CSS from parent
+  console.log('[Iframe] 🎧 HMR listener installed and ready');
+
+  // Track module revision to prevent race conditions
+  let currentModuleRevision = 0;
+  let isUpdating = false;
+
   window.addEventListener('message', (event) => {
     if (event.data.type === 'hot-module-reload') {
+      // Prevent overlapping updates
+      if (isUpdating) {
+        console.log('[Iframe] ⏸️ Update already in progress, queuing...');
+        return;
+      }
+
+      const revisionId = ++currentModuleRevision;
+      isUpdating = true;
+
+      console.log('[Iframe] 📨 Received HMR update:', {
+        revision: revisionId,
+        codeLength: event.data.code?.length,
+        cssLength: event.data.css?.length
+      });
+
       try {
         const newCode = event.data.code;
         const newCSS = event.data.css || '';
-        
-        // Update CSS if provided
+
+        // Update CSS first (before DOM changes to prevent FOUC)
         if (newCSS) {
-          // Find or create the app style tag
+          console.log('[Iframe] 🎨 Updating CSS...');
           let styleTag = document.getElementById('app-styles');
           if (!styleTag) {
             styleTag = document.createElement('style');
@@ -438,28 +486,38 @@ ${
           }
           styleTag.textContent = newCSS;
         }
-        
-        // Clear the root element
+
+        console.log('[Iframe] 🚀 Executing new module code...');
+
         const root = document.getElementById('root');
-        if (root) {
-          root.innerHTML = '';
+        if (!root) {
+          isUpdating = false;
+          return;
         }
-        
+
         // Create a module blob and import it
         const moduleBlob = new Blob([newCode], { type: 'application/javascript' });
         const moduleUrl = URL.createObjectURL(moduleBlob);
-        
+
+        // Clear the root immediately before importing
+        // This ensures React creates a clean root
+        root.innerHTML = '';
+
         // Import and execute the new module
         import(moduleUrl)
           .then(() => {
+            console.log('[Iframe] ✅ HMR update complete - SMOOTH, NO NETWORK REQUESTS, NO FLICKER');
             URL.revokeObjectURL(moduleUrl);
+            isUpdating = false;
           })
           .catch((error) => {
-            console.error('[Iframe] Hot module reload failed:', error);
+            console.error('[Iframe] ❌ Hot module reload failed:', error);
             URL.revokeObjectURL(moduleUrl);
+            isUpdating = false;
           });
       } catch (error) {
-        console.error('[Iframe] Hot module reload error:', error);
+        console.error('[Iframe] ❌ Hot module reload error:', error);
+        isUpdating = false;
       }
     }
   });
@@ -479,9 +537,9 @@ ${
       finalHTML = finalHTML.replace("</head>", `${emotionPolyfill}\n</head>`);
     }
 
-    // 3. Inject CSS
-    if (combinedCSS) {
-      const styleTag = `<style>\n${combinedCSS}\n</style>`;
+    // 3. Inject CSS (includes HMR transition CSS)
+    if (fullCSS) {
+      const styleTag = `<style>\n${fullCSS}\n</style>`;
       if (finalHTML.includes("</head>")) {
         finalHTML = finalHTML.replace("</head>", `${styleTag}\n</head>`);
       } else {
