@@ -10,14 +10,27 @@ export const Preview: React.FC = () => {
   const [isConsoleExpanded, setIsConsoleExpanded] = useState(true);
   const [lastUpdate, setLastUpdate] = useState(0);
   const [iframeKey, setIframeKey] = useState(0);
-  const [htmlContent, setHtmlContent] = useState('');
-  const [isTransitioning, setIsTransitioning] = useState(false);
+  const [htmlContent, setHtmlContent] = useState("");
   const debounceTimerRef = useRef<NodeJS.Timeout>();
-  const { files } = useFileSystemStore();
+  const isFirstRender = useRef(true);
+  const files = useFileSystemStore((s) => s.files);
+  const getInstalledPackages = useFileSystemStore(
+    (s) => s.getInstalledPackages
+  );
+  const lastPackagesRef = useRef<string>(
+    JSON.stringify(getInstalledPackages())
+  );
 
   // Handle console messages from iframe
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
+      // SECURITY: Validate message origin to prevent malicious messages
+      // In production, you should validate against your specific origin
+      // For development, we check it's from the same origin or iframe
+      if (event.source !== iframeRef.current?.contentWindow) {
+        return; // Ignore messages not from our iframe
+      }
+
       if (event.data.type === "console") {
         const message: ConsoleMessage = {
           id: `${Date.now()}-${Math.random()}`,
@@ -35,8 +48,11 @@ export const Preview: React.FC = () => {
 
   // Bundle and update iframe
   const updatePreview = useCallback(async () => {
+    const startTime = performance.now();
     try {
       const result = await bundleFiles(files);
+      const bundleTime = performance.now() - startTime;
+      console.log(`[Preview] Bundle time: ${bundleTime.toFixed(2)}ms`);
 
       if (result.error) {
         setConsoleMessages((prev) => [
@@ -51,34 +67,44 @@ export const Preview: React.FC = () => {
         return;
       }
 
-      // Smooth transition: fade out → update → fade in
-      setIsTransitioning(true);
+      // Check if packages changed (need iframe recreation for MUI/Emotion cache)
+      const currentPackages = JSON.stringify(getInstalledPackages());
+      const packagesChanged = currentPackages !== lastPackagesRef.current;
 
-      // Wait for fade out animation
-      setTimeout(() => {
-        // Force iframe recreation by updating key - this ensures Emotion cache starts fresh
+      if (isFirstRender.current || packagesChanged) {
+        console.log(
+          "[Preview] First render or packages changed, recreating iframe..."
+        );
+        isFirstRender.current = false;
+        lastPackagesRef.current = currentPackages;
         setIframeKey((prev) => prev + 1);
-        setHtmlContent(result.html);
-        setLastUpdate(Date.now());
+      } else {
+        console.log(
+          "[Preview] Packages unchanged, updating content only (FAST)..."
+        );
+      }
 
-        // Fade back in after a brief moment
-        setTimeout(() => {
-          setIsTransitioning(false);
-        }, 50);
-      }, 150);
+      setHtmlContent(result.html);
+      setLastUpdate(Date.now());
+
+      const totalTime = performance.now() - startTime;
+      console.log(`[Preview] Total update time: ${totalTime.toFixed(2)}ms`);
     } catch (error) {
       setConsoleMessages((prev) => [
         ...prev,
         {
           id: `${Date.now()}-error`,
           method: "error",
-          args: [`Bundle Error: ${error instanceof Error ? error.message : 'Unknown error'}`],
+          args: [
+            `Bundle Error: ${
+              error instanceof Error ? error.message : "Unknown error"
+            }`,
+          ],
           timestamp: Date.now(),
         },
       ]);
-      setIsTransitioning(false);
     }
-  }, [files]);
+  }, [files, getInstalledPackages]);
 
   // Debounced update on file changes
   useEffect(() => {
@@ -87,10 +113,11 @@ export const Preview: React.FC = () => {
       clearTimeout(debounceTimerRef.current);
     }
 
-    // Set new timer for 500ms
+    // Set new timer for 300ms debounce (faster feedback)
     debounceTimerRef.current = setTimeout(() => {
+      console.log("[Preview] Debounce triggered, starting update...");
       updatePreview();
-    }, 500);
+    }, 300);
 
     return () => {
       if (debounceTimerRef.current) {
@@ -101,6 +128,8 @@ export const Preview: React.FC = () => {
 
   const handleRefresh = () => {
     setConsoleMessages([]);
+    // Force iframe recreation on manual refresh
+    setIframeKey((prev) => prev + 1);
     updatePreview();
   };
 
@@ -146,10 +175,8 @@ export const Preview: React.FC = () => {
           ref={iframeRef}
           title="preview"
           srcDoc={htmlContent}
-          sandbox="allow-scripts allow-same-origin allow-forms allow-modals"
-          className={`w-full h-full border-0 transition-opacity duration-150 ${
-            isTransitioning ? "opacity-0" : "opacity-100"
-          }`}
+          sandbox="allow-scripts allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox"
+          className="w-full h-full border-0"
         />
       </div>
 
