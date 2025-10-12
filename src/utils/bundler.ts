@@ -1,4 +1,4 @@
-import * as esbuild from 'esbuild-wasm';
+import * as esbuild from "esbuild-wasm";
 import { type FileNode } from "../types/fileSystem";
 import { getResolver } from "./resolvers";
 
@@ -15,6 +15,12 @@ interface FileWithContent {
 
 let esbuildInitialized = false;
 
+// Cache for bundling results to avoid redundant work
+let bundleCache: {
+  filesHash: string;
+  result: BundleResult;
+} | null = null;
+
 /**
  * Initialize esbuild-wasm (call once)
  */
@@ -22,21 +28,56 @@ export async function initializeBundler() {
   if (!esbuildInitialized) {
     try {
       await esbuild.initialize({
-        wasmURL: '/esbuild.wasm',
+        wasmURL: "/esbuild.wasm",
       });
       esbuildInitialized = true;
     } catch (error) {
-      console.error('Failed to initialize esbuild:', error);
+      console.error("Failed to initialize esbuild:", error);
       throw error;
     }
   }
 }
 
 /**
+ * Generate a hash of file contents for cache comparison
+ * OPTIMIZED: Fast hash without joining entire content
+ */
+function hashFiles(files: Record<string, FileNode>): string {
+  let hash = "";
+  const collectContent = (nodes: Record<string, FileNode>, path = ""): void => {
+    Object.entries(nodes).forEach(([key, node]) => {
+      const nodePath = path ? `${path}/${key}` : key;
+      if (node.type === "file" && node.content !== undefined) {
+        // Simple hash: path + content length + first/last 100 chars
+        const content = node.content;
+        const start = content.substring(0, 100);
+        const end =
+          content.length > 100 ? content.substring(content.length - 100) : "";
+        hash += `${nodePath}:${content.length}:${start}:${end}|`;
+      } else if (node.type === "folder" && node.children) {
+        collectContent(node.children, nodePath);
+      }
+    });
+  };
+
+  collectContent(files);
+
+  return hash;
+}
+
+/**
  * Bundles all files into a single HTML document for preview
  */
-export async function bundleFiles(files: Record<string, FileNode>): Promise<BundleResult> {
+export async function bundleFiles(
+  files: Record<string, FileNode>
+): Promise<BundleResult> {
   try {
+    // Check cache first
+    const filesHash = hashFiles(files);
+    if (bundleCache && bundleCache.filesHash === filesHash) {
+      return bundleCache.result;
+    }
+
     // Initialize esbuild if not already done
     await initializeBundler();
 
@@ -47,7 +88,10 @@ export async function bundleFiles(files: Record<string, FileNode>): Promise<Bund
     const jsFiles: FileWithContent[] = [];
 
     // Recursively collect files
-    const collectFiles = (nodes: Record<string, FileNode>, currentPath = '') => {
+    const collectFiles = (
+      nodes: Record<string, FileNode>,
+      currentPath = ""
+    ) => {
       Object.entries(nodes).forEach(([key, node]) => {
         const nodePath = currentPath ? `${currentPath}/${key}` : key;
 
@@ -97,15 +141,18 @@ export async function bundleFiles(files: Record<string, FileNode>): Promise<Bund
     const combinedCSS = cssFiles.join("\n\n");
 
     // Find entry point (index.js or index.jsx)
-    const entryFile = [...jsFiles, ...jsxFiles].find(f =>
-      f.name === 'src/index.js' || f.name === 'src/index.jsx' ||
-      f.name === 'index.js' || f.name === 'index.jsx'
+    const entryFile = [...jsFiles, ...jsxFiles].find(
+      (f) =>
+        f.name === "src/index.js" ||
+        f.name === "src/index.jsx" ||
+        f.name === "index.js" ||
+        f.name === "index.jsx"
     );
 
     if (!entryFile) {
       return {
         html: baseHTML,
-        error: 'No entry point found (index.js or index.jsx)',
+        error: "No entry point found (index.js or index.jsx)",
       };
     }
 
@@ -113,74 +160,83 @@ export async function bundleFiles(files: Record<string, FileNode>): Promise<Bund
     const allFiles = [...jsxFiles, ...jsFiles];
 
     // Read package.json FIRST to get installed dependencies
-    const packageJsonNode = files['package.json'];
+    const packageJsonNode = files["package.json"];
     let packageVersions: Record<string, string> = {};
 
-    if (packageJsonNode && packageJsonNode.type === 'file' && packageJsonNode.content) {
+    if (
+      packageJsonNode &&
+      packageJsonNode.type === "file" &&
+      packageJsonNode.content
+    ) {
       try {
         const packageJson = JSON.parse(packageJsonNode.content);
         packageVersions = packageJson.dependencies || {};
       } catch (error) {
-        console.error('Failed to parse package.json:', error);
+        console.error("Failed to parse package.json:", error);
       }
     }
 
     // Helper to detect if file contains JSX
     const containsJSX = (content: string) => {
-      return /<[A-Z][a-zA-Z0-9]*[\s/>]/.test(content) || /<[a-z]+[\s/>]/.test(content);
+      return (
+        /<[A-Z][a-zA-Z0-9]*[\s/>]/.test(content) ||
+        /<[a-z]+[\s/>]/.test(content)
+      );
     };
 
     // Determine loader for entry file
-    const getLoader = (file: FileWithContent): 'jsx' | 'tsx' | 'ts' | 'js' => {
-      if (file.ext === 'tsx' || file.ext === 'jsx') return 'jsx';
-      if (file.ext === 'ts') return 'ts';
+    const getLoader = (file: FileWithContent): "jsx" | "tsx" | "ts" | "js" => {
+      if (file.ext === "tsx" || file.ext === "jsx") return "jsx";
+      if (file.ext === "ts") return "ts";
       // Check if JS file contains JSX
-      if (file.ext === 'js' && containsJSX(file.content)) return 'jsx';
-      return 'js';
+      if (file.ext === "js" && containsJSX(file.content)) return "jsx";
+      return "js";
     };
 
     // Check if Material UI or Emotion is used
-    const usesMui = Object.keys(packageVersions).some(pkg =>
-      pkg.includes('@mui') || pkg.includes('@emotion')
+    const usesMui = Object.keys(packageVersions).some(
+      (pkg) => pkg.includes("@mui") || pkg.includes("@emotion")
     );
 
     // Build with esbuild
-    const result = await esbuild.build({
+    const buildResult = await esbuild.build({
       stdin: {
         contents: entryFile.content,
-        resolveDir: '/',
+        resolveDir: "/",
         sourcefile: entryFile.name,
         loader: getLoader(entryFile),
       },
       bundle: true,
       write: false,
-      format: 'esm',
-      jsx: 'automatic',
-      jsxImportSource: usesMui ? '@emotion/react' : 'react',
+      format: "esm",
+      jsx: "automatic",
+      jsxImportSource: usesMui ? "@emotion/react" : "react",
       plugins: [
         {
-          name: 'virtual-fs',
+          name: "virtual-fs",
           setup(build) {
             // Handle CSS imports first - mark them as external (we inject CSS separately)
             build.onResolve({ filter: /\.css$/ }, () => {
               return {
-                path: '__css__',
-                namespace: 'css-stub',
+                path: "__css__",
+                namespace: "css-stub",
                 external: false,
               };
             });
 
             // Provide empty module for CSS imports
-            build.onLoad({ filter: /.*/, namespace: 'css-stub' }, () => {
+            build.onLoad({ filter: /.*/, namespace: "css-stub" }, () => {
               return {
-                contents: '// CSS is injected separately',
-                loader: 'js',
+                contents: "// CSS is injected separately",
+                loader: "js",
               };
             });
 
             // Resolve local imports
             build.onResolve({ filter: /^\./ }, (args) => {
-              const path = args.path.startsWith('./') ? args.path.slice(2) : args.path;
+              const path = args.path.startsWith("./")
+                ? args.path.slice(2)
+                : args.path;
 
               // Try to find the file with various extensions
               const possiblePaths = [
@@ -192,13 +248,14 @@ export async function bundleFiles(files: Record<string, FileNode>): Promise<Bund
               ];
 
               for (const testPath of possiblePaths) {
-                const file = allFiles.find(f =>
-                  f.name === testPath ||
-                  f.name === `src/${testPath}` ||
-                  f.name.endsWith(`/${testPath}`)
+                const file = allFiles.find(
+                  (f) =>
+                    f.name === testPath ||
+                    f.name === `src/${testPath}` ||
+                    f.name.endsWith(`/${testPath}`)
                 );
                 if (file) {
-                  return { path: file.name, namespace: 'virtual' };
+                  return { path: file.name, namespace: "virtual" };
                 }
               }
 
@@ -206,8 +263,8 @@ export async function bundleFiles(files: Record<string, FileNode>): Promise<Bund
             });
 
             // Load virtual files
-            build.onLoad({ filter: /.*/, namespace: 'virtual' }, (args) => {
-              const file = allFiles.find(f => f.name === args.path);
+            build.onLoad({ filter: /.*/, namespace: "virtual" }, (args) => {
+              const file = allFiles.find((f) => f.name === args.path);
               if (file) {
                 return {
                   contents: file.content,
@@ -219,7 +276,7 @@ export async function bundleFiles(files: Record<string, FileNode>): Promise<Bund
 
             // Mark external packages as external (they'll use CDN)
             build.onResolve({ filter: /^[^.]/ }, (args) => {
-              if (!args.path.startsWith('/')) {
+              if (!args.path.startsWith("/")) {
                 return { path: args.path, external: true };
               }
               return null;
@@ -229,37 +286,42 @@ export async function bundleFiles(files: Record<string, FileNode>): Promise<Bund
       ],
     });
 
-    let bundledJS = '';
-    if (result.outputFiles && result.outputFiles.length > 0) {
-      bundledJS = new TextDecoder().decode(result.outputFiles[0].contents);
+    let bundledJS = "";
+    if (buildResult.outputFiles && buildResult.outputFiles.length > 0) {
+      bundledJS = new TextDecoder().decode(buildResult.outputFiles[0].contents);
     }
 
     // Build import map for external dependencies
     const externalPackages = new Set<string>();
 
     // Add all dependencies from package.json
-    Object.keys(packageVersions).forEach(pkg => {
+    Object.keys(packageVersions).forEach((pkg) => {
       externalPackages.add(pkg);
     });
 
     // Extract imports from all files
-    const importRegex = /import\s+(?:(?:[\w*\s{},]*)\s+from\s+)?['"]([^'"]+)['"]/g;
-    allFiles.forEach(file => {
+    const importRegex =
+      /import\s+(?:(?:[\w*\s{},]*)\s+from\s+)?['"]([^'"]+)['"]/g;
+    allFiles.forEach((file) => {
       let match;
       while ((match = importRegex.exec(file.content)) !== null) {
         const pkg = match[1];
-        if (!pkg.startsWith('.') && !pkg.startsWith('/') && !pkg.endsWith('.css')) {
+        if (
+          !pkg.startsWith(".") &&
+          !pkg.startsWith("/") &&
+          !pkg.endsWith(".css")
+        ) {
           // For scoped packages like @mui/material, use the full scope
           // For regular packages, use just the base name
-          if (pkg.startsWith('@')) {
+          if (pkg.startsWith("@")) {
             // Get @scope/package (e.g., @mui/material from @mui/material/Button)
-            const parts = pkg.split('/');
+            const parts = pkg.split("/");
             if (parts.length >= 2) {
               const scopedPkg = `${parts[0]}/${parts[1]}`;
               externalPackages.add(scopedPkg);
             }
           } else {
-            const basePkg = pkg.split('/')[0];
+            const basePkg = pkg.split("/")[0];
             externalPackages.add(basePkg);
           }
         }
@@ -268,8 +330,8 @@ export async function bundleFiles(files: Record<string, FileNode>): Promise<Bund
 
     // Always include React for JSX files
     if (jsxFiles.length > 0) {
-      externalPackages.add('react');
-      externalPackages.add('react-dom');
+      externalPackages.add("react");
+      externalPackages.add("react-dom");
     }
 
     // Use resolver factory to build import map
@@ -277,13 +339,18 @@ export async function bundleFiles(files: Record<string, FileNode>): Promise<Bund
     const resolver = getResolver(packageVersions);
     const { imports } = resolver(packageVersions, externalPackages);
 
-    const importMap = Object.keys(imports).length > 0 ? `
+    const importMap =
+      Object.keys(imports).length > 0
+        ? `
 <script type="importmap">
 ${JSON.stringify({ imports }, null, 2)}
-</script>` : '';
+</script>`
+        : "";
 
     // Check if Emotion is being used
-    const hasEmotion = Object.keys(externalPackages).some(pkg => pkg.includes('@emotion'));
+    const hasEmotion = Object.keys(externalPackages).some((pkg) =>
+      pkg.includes("@emotion")
+    );
 
     // Emotion runtime polyfill for CSS-in-JS
     const emotionPolyfill = `
@@ -295,16 +362,15 @@ if (typeof global === 'undefined') {
 if (typeof process === 'undefined') {
   window.process = { env: { NODE_ENV: 'development' } };
 }
-${hasEmotion ? `
+${
+  hasEmotion
+    ? `
 // CRITICAL: Ensure document.head is available for Emotion style injection
 // Material UI v5+ uses Emotion which injects styles dynamically
-if (typeof document !== 'undefined') {
-  // Emotion will create its own cache and inject styles here
-  // Just ensure the environment is ready
-  console.log('[Emotion] Runtime environment ready for style injection');
-  console.log('[Emotion] document.head available:', !!document.head);
+// Environment is ready for style injection
+`
+    : ""
 }
-` : ''}
 </script>`;
 
     // Console interceptor
@@ -353,6 +419,50 @@ if (typeof document !== 'undefined') {
       args: ['Unhandled Promise Rejection: ' + event.reason]
     }, '*');
   });
+
+  // HOT MODULE RELOAD: Listen for new code AND CSS from parent
+  window.addEventListener('message', (event) => {
+    if (event.data.type === 'hot-module-reload') {
+      try {
+        const newCode = event.data.code;
+        const newCSS = event.data.css || '';
+        
+        // Update CSS if provided
+        if (newCSS) {
+          // Find or create the app style tag
+          let styleTag = document.getElementById('app-styles');
+          if (!styleTag) {
+            styleTag = document.createElement('style');
+            styleTag.id = 'app-styles';
+            document.head.appendChild(styleTag);
+          }
+          styleTag.textContent = newCSS;
+        }
+        
+        // Clear the root element
+        const root = document.getElementById('root');
+        if (root) {
+          root.innerHTML = '';
+        }
+        
+        // Create a module blob and import it
+        const moduleBlob = new Blob([newCode], { type: 'application/javascript' });
+        const moduleUrl = URL.createObjectURL(moduleBlob);
+        
+        // Import and execute the new module
+        import(moduleUrl)
+          .then(() => {
+            URL.revokeObjectURL(moduleUrl);
+          })
+          .catch((error) => {
+            console.error('[Iframe] Hot module reload failed:', error);
+            URL.revokeObjectURL(moduleUrl);
+          });
+      } catch (error) {
+        console.error('[Iframe] Hot module reload error:', error);
+      }
+    }
+  });
 })();
 </script>`;
 
@@ -381,7 +491,10 @@ if (typeof document !== 'undefined') {
 
     // 4. Inject console interceptor
     if (finalHTML.includes("</head>")) {
-      finalHTML = finalHTML.replace("</head>", `${consoleInterceptor}\n</head>`);
+      finalHTML = finalHTML.replace(
+        "</head>",
+        `${consoleInterceptor}\n</head>`
+      );
     } else if (finalHTML.includes("<body>")) {
       finalHTML = finalHTML.replace("<body>", `<body>\n${consoleInterceptor}`);
     } else {
@@ -390,7 +503,9 @@ if (typeof document !== 'undefined') {
 
     // 5. Inject bundled JS
     if (bundledJS) {
-      const scriptTag = `<script type="module">\n${bundledJS}\n</script>`;
+      const scriptTag = `<script type="module">
+${bundledJS}
+</script>`;
       if (finalHTML.includes("</body>")) {
         finalHTML = finalHTML.replace("</body>", `${scriptTag}\n</body>`);
       } else {
@@ -398,11 +513,20 @@ if (typeof document !== 'undefined') {
       }
     }
 
-    return { html: finalHTML };
+    const result: BundleResult = { html: finalHTML };
+
+    // Update cache
+    bundleCache = {
+      filesHash,
+      result,
+    };
+
+    return result;
   } catch (error) {
-    return {
+    const errorResult: BundleResult = {
       html: "",
       error: error instanceof Error ? error.message : "Unknown bundling error",
     };
+    return errorResult;
   }
 }

@@ -1,6 +1,10 @@
 import { create } from "zustand";
 import { type FileNode } from "../types/fileSystem";
-import { getDefaultTemplate, type Template, type TemplateType } from "../utils/templates";
+import {
+  getDefaultTemplate,
+  type Template,
+  type TemplateType,
+} from "../utils/templates";
 
 interface FileSystemStore {
   files: Record<string, FileNode>;
@@ -54,16 +58,25 @@ const getNodeAtPath = (
   return node;
 };
 
-// Helper function to set node at path
+// Helper function to shallow clone a folder node
+const shallowCloneFolder = (folder: FileNode): FileNode => {
+  return {
+    ...folder,
+    children: folder.children ? { ...folder.children } : {},
+  };
+};
+
+// Helper function to set node at path (OPTIMIZED - minimal cloning)
 const setNodeAtPath = (
   files: Record<string, FileNode>,
   path: string,
   node: FileNode | null
 ): Record<string, FileNode> => {
-  const newFiles = JSON.parse(JSON.stringify(files)); // Deep clone
   const parts = path.split("/").filter(Boolean);
 
+  // Root level - shallow clone only the root
   if (parts.length === 1) {
+    const newFiles = { ...files };
     if (node === null) {
       delete newFiles[parts[0]];
     } else {
@@ -72,15 +85,26 @@ const setNodeAtPath = (
     return newFiles;
   }
 
+  // Nested - only clone the path we're modifying
+  const newFiles = { ...files };
   let current: Record<string, FileNode> = newFiles;
+
+  // Clone each folder in the path
   for (let i = 0; i < parts.length - 1; i++) {
     const part = parts[i];
-    if (!current[part] || current[part].type !== "folder") {
+    const folder = current[part];
+
+    if (!folder || folder.type !== "folder") {
       return files; // Invalid path
     }
-    current = current[part].children!;
+
+    // Shallow clone this folder
+    const clonedFolder = shallowCloneFolder(folder);
+    current[part] = clonedFolder;
+    current = clonedFolder.children!;
   }
 
+  // Update the target node
   const lastName = parts[parts.length - 1];
   if (node === null) {
     delete current[lastName];

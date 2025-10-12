@@ -11,17 +11,59 @@ export const Preview: React.FC = () => {
   const [lastUpdate, setLastUpdate] = useState(0);
   const [iframeKey, setIframeKey] = useState(0);
   const [htmlContent, setHtmlContent] = useState("");
-  const debounceTimerRef = useRef<NodeJS.Timeout>();
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadingMessage, setLoadingMessage] = useState(
+    "Initializing preview..."
+  );
+  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(
+    undefined
+  );
   const isFirstRender = useRef(true);
   const files = useFileSystemStore((s) => s.files);
   const getInstalledPackages = useFileSystemStore(
     (s) => s.getInstalledPackages
   );
-  const lastPackagesRef = useRef<string>(
-    JSON.stringify(getInstalledPackages())
-  );
+  const filesRef = useRef(files);
+  const lastPackagesRef = useRef<string>("");
+  const htmlUpdateTimeRef = useRef<number>(0);
 
-  // Handle console messages from iframe
+  // Initialize package ref once
+  useEffect(() => {
+    if (lastPackagesRef.current === "") {
+      lastPackagesRef.current = JSON.stringify(getInstalledPackages());
+    }
+  }, [getInstalledPackages]);
+
+  // Keep files ref up to date
+  useEffect(() => {
+    filesRef.current = files;
+  }, [files]);
+
+  // Track when HTML content actually changes
+  useEffect(() => {
+    if (htmlContent) {
+      const now = performance.now();
+      htmlUpdateTimeRef.current = now;
+    }
+  }, [htmlContent]);
+
+  // Track iframe load events
+  useEffect(() => {
+    const iframe = iframeRef.current;
+    if (!iframe) return;
+
+    const handleLoad = () => {
+      // Hide loading after a short delay to ensure content is rendered
+      setTimeout(() => {
+        setIsLoading(false);
+      }, 100);
+    };
+
+    iframe.addEventListener("load", handleLoad);
+    return () => iframe.removeEventListener("load", handleLoad);
+  }, [iframeKey]); // Re-attach on iframe recreation
+
+  // Handle console messages and hot reload from iframe
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
       // SECURITY: Validate message origin to prevent malicious messages
@@ -46,13 +88,12 @@ export const Preview: React.FC = () => {
     return () => window.removeEventListener("message", handleMessage);
   }, []);
 
-  // Bundle and update iframe
+  // Bundle and update iframe (memoized to avoid recreation)
   const updatePreview = useCallback(async () => {
-    const startTime = performance.now();
+    setLoadingMessage("Bundling code...");
+
     try {
-      const result = await bundleFiles(files);
-      const bundleTime = performance.now() - startTime;
-      console.log(`[Preview] Bundle time: ${bundleTime.toFixed(2)}ms`);
+      const result = await bundleFiles(filesRef.current);
 
       if (result.error) {
         setConsoleMessages((prev) => [
@@ -72,23 +113,71 @@ export const Preview: React.FC = () => {
       const packagesChanged = currentPackages !== lastPackagesRef.current;
 
       if (isFirstRender.current || packagesChanged) {
-        console.log(
-          "[Preview] First render or packages changed, recreating iframe..."
-        );
         isFirstRender.current = false;
         lastPackagesRef.current = currentPackages;
+        setIsLoading(true);
+        setLoadingMessage("Loading preview...");
         setIframeKey((prev) => prev + 1);
+        setHtmlContent(result.html);
+        setLastUpdate(Date.now());
       } else {
-        console.log(
-          "[Preview] Packages unchanged, updating content only (FAST)..."
-        );
+        // Hot Module Reload: Send new code AND CSS to iframe
+        const iframe = iframeRef.current;
+        if (iframe && iframe.contentWindow) {
+          try {
+            // Extract the bundled JavaScript from HTML
+            const scriptMatch = result.html.match(
+              /<script type="module">\s*const appExecutionStart[\s\S]*?<\/script>/
+            );
+
+            // Extract CSS from HTML
+            const cssMatch = result.html.match(
+              /<style>\s*([\s\S]*?)\s*<\/style>/
+            );
+            const cssContent = cssMatch ? cssMatch[1] : "";
+
+            if (scriptMatch) {
+              const scriptContent = scriptMatch[0];
+              // Extract just the app code (between performance markers)
+              const codeMatch = scriptContent.match(
+                /console\.log\('\[Iframe\] 🎯 App code execution starting\.\.\.'\);\s*([\s\S]*?)\s*\/\/ Track React render/
+              );
+
+              if (codeMatch) {
+                const appCode = codeMatch[1].trim();
+
+                // Show brief loading for hot reload
+                setIsLoading(true);
+                setLoadingMessage("Updating...");
+
+                // Send the new app code AND CSS to the iframe for execution
+                iframe.contentWindow.postMessage(
+                  {
+                    type: "hot-module-reload",
+                    code: appCode,
+                    css: cssContent,
+                  },
+                  "*"
+                );
+
+                // Hide loading quickly for hot reload
+                setTimeout(() => setIsLoading(false), 150);
+              } else {
+                throw new Error("Could not extract app code from script");
+              }
+            } else {
+              throw new Error("Could not find script tag in HTML");
+            }
+          } catch {
+            // Fallback: full reload if extraction fails
+            setHtmlContent(result.html);
+          }
+        } else {
+          // Fallback: update srcDoc if iframe not ready
+          setHtmlContent(result.html);
+        }
+        setLastUpdate(Date.now());
       }
-
-      setHtmlContent(result.html);
-      setLastUpdate(Date.now());
-
-      const totalTime = performance.now() - startTime;
-      console.log(`[Preview] Total update time: ${totalTime.toFixed(2)}ms`);
     } catch (error) {
       setConsoleMessages((prev) => [
         ...prev,
@@ -104,7 +193,7 @@ export const Preview: React.FC = () => {
         },
       ]);
     }
-  }, [files, getInstalledPackages]);
+  }, [getInstalledPackages]); // Only depend on getInstalledPackages, use filesRef
 
   // Debounced update on file changes
   useEffect(() => {
@@ -113,11 +202,10 @@ export const Preview: React.FC = () => {
       clearTimeout(debounceTimerRef.current);
     }
 
-    // Set new timer for 300ms debounce (faster feedback)
+    // Set new timer for 150ms debounce (fast feedback, bundle is cached at 15ms)
     debounceTimerRef.current = setTimeout(() => {
-      console.log("[Preview] Debounce triggered, starting update...");
       updatePreview();
-    }, 300);
+    }, 150);
 
     return () => {
       if (debounceTimerRef.current) {
@@ -168,7 +256,7 @@ export const Preview: React.FC = () => {
       <div
         className={`${
           isConsoleExpanded ? "flex-1" : "flex-[2]"
-        } bg-white overflow-hidden`}
+        } bg-white overflow-hidden relative`}
       >
         <iframe
           key={iframeKey}
@@ -178,6 +266,17 @@ export const Preview: React.FC = () => {
           sandbox="allow-scripts allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox"
           className="w-full h-full border-0"
         />
+
+        {/* Loading Overlay */}
+        {isLoading && (
+          <div className="absolute inset-0 bg-white bg-opacity-90 flex items-center justify-center z-10">
+            <div className="text-center">
+              <div className="inline-block animate-spin rounded-full h-12 w-12 border-4 border-gray-300 border-t-blue-500 mb-4"></div>
+              <p className="text-gray-700 font-medium">{loadingMessage}</p>
+              <p className="text-gray-500 text-sm mt-1">Please wait...</p>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Console */}
