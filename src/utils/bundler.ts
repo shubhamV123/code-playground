@@ -5,6 +5,10 @@ import { getResolver } from "./resolvers";
 export interface BundleResult {
   html: string;
   error?: string;
+  // Metadata for smart reload decisions
+  requiresFullReload?: boolean; // True if dependencies changed (file deleted, imports changed)
+  fileList?: string[]; // List of all files in the bundle
+  dependencyGraph?: Record<string, string[]>; // Map of file -> imported files
 }
 
 interface FileWithContent {
@@ -18,6 +22,8 @@ let esbuildInitialized = false;
 // Cache for bundling results to avoid redundant work
 let bundleCache: {
   filesHash: string;
+  fileList: string[];
+  dependencyGraph: Record<string, string[]>;
   result: BundleResult;
 } | null = null;
 
@@ -66,6 +72,88 @@ function hashFiles(files: Record<string, FileNode>): string {
 }
 
 /**
+ * Extract all imports from a file (excluding commented lines)
+ * Returns array of imported paths
+ */
+function extractImports(content: string): string[] {
+  const imports: string[] = [];
+  const lines = content.split('\n');
+
+  lines.forEach((line) => {
+    // Skip commented lines
+    const trimmedLine = line.trim();
+    if (trimmedLine.startsWith('//') || trimmedLine.startsWith('/*') || trimmedLine.startsWith('*')) {
+      return;
+    }
+
+    // Match import statements: import X from 'Y' or import 'Y'
+    const importRegex = /import\s+(?:(?:[\w*\s{},]*)\s+from\s+)?['"]([^'"]+)['"]/g;
+    let match;
+    while ((match = importRegex.exec(line)) !== null) {
+      imports.push(match[1]);
+    }
+  });
+
+  return imports;
+}
+
+/**
+ * Build dependency graph: maps each file to list of files it imports
+ */
+function buildDependencyGraph(
+  files: Array<{ name: string; content: string }>
+): Record<string, string[]> {
+  const graph: Record<string, string[]> = {};
+
+  files.forEach((file) => {
+    const imports = extractImports(file.content);
+    graph[file.name] = imports;
+  });
+
+  return graph;
+}
+
+/**
+ * Check if dependency graphs are different
+ */
+function dependencyGraphChanged(
+  oldGraph: Record<string, string[]>,
+  newGraph: Record<string, string[]>
+): boolean {
+  // Check if file list changed (files added or deleted)
+  const oldFiles = Object.keys(oldGraph).sort();
+  const newFiles = Object.keys(newGraph).sort();
+
+  if (oldFiles.length !== newFiles.length) {
+    console.log('[Bundler] 📁 File count changed:', oldFiles.length, '→', newFiles.length);
+    return true;
+  }
+
+  if (oldFiles.some((file, i) => file !== newFiles[i])) {
+    console.log('[Bundler] 📁 File list changed');
+    return true;
+  }
+
+  // Check if imports changed for any file
+  for (const file of newFiles) {
+    const oldImports = (oldGraph[file] || []).sort();
+    const newImports = (newGraph[file] || []).sort();
+
+    if (oldImports.length !== newImports.length) {
+      console.log(`[Bundler] 📦 Imports changed for ${file}:`, oldImports.length, '→', newImports.length);
+      return true;
+    }
+
+    if (oldImports.some((imp, i) => imp !== newImports[i])) {
+      console.log(`[Bundler] 📦 Import statements changed for ${file}`);
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
  * Bundles all files into a single HTML document for preview
  */
 export async function bundleFiles(
@@ -83,7 +171,7 @@ export async function bundleFiles(
 
     // Extract files by type
     const htmlFiles: string[] = [];
-    const cssFiles: string[] = [];
+    const cssFilesMap = new Map<string, string>(); // Map of path -> content
     const jsxFiles: FileWithContent[] = [];
     const jsFiles: FileWithContent[] = [];
 
@@ -103,7 +191,8 @@ export async function bundleFiles(
               htmlFiles.push(node.content);
               break;
             case "css":
-              cssFiles.push(node.content);
+              // Store CSS files with their paths so we can track imports
+              cssFilesMap.set(nodePath, node.content);
               break;
             case "jsx":
             case "tsx":
@@ -122,6 +211,75 @@ export async function bundleFiles(
 
     collectFiles(files);
 
+    // Build dependency graph for all JS/JSX/TS/TSX files
+    const allFiles = [...jsxFiles, ...jsFiles];
+    const currentDependencyGraph = buildDependencyGraph(allFiles);
+    const currentFileList = allFiles.map(f => f.name).sort();
+
+    // Check if dependencies changed (files added/deleted/imports changed)
+    let requiresFullReload = false;
+    if (bundleCache) {
+      if (dependencyGraphChanged(bundleCache.dependencyGraph, currentDependencyGraph)) {
+        console.log('[Bundler] 🔄 Dependencies changed - full reload required');
+        requiresFullReload = true;
+      }
+    }
+
+    // Track which CSS files are actually imported
+    const importedCssContents = new Set<string>();
+    const jsAndJsxFiles = [...jsxFiles, ...jsFiles];
+
+    // Scan all JS/JSX files for CSS imports (excluding commented lines)
+    jsAndJsxFiles.forEach((file) => {
+      // Split content by lines to check for comments
+      const lines = file.content.split('\n');
+
+      lines.forEach((line) => {
+        // Skip commented lines (single-line comments)
+        const trimmedLine = line.trim();
+        if (trimmedLine.startsWith('//')) {
+          return;
+        }
+
+        // Check for CSS import in this line
+        const cssImportRegex = /import\s+['"]([^'"]+\.css)['"]/;
+        const match = cssImportRegex.exec(line);
+
+        if (match) {
+          const cssPath = match[1];
+
+          // Resolve the CSS path relative to the importing file
+          const fileDir = file.name.includes('/')
+            ? file.name.substring(0, file.name.lastIndexOf('/'))
+            : '';
+
+          // Handle different import patterns: './styles.css', '../styles.css', 'styles.css'
+          let resolvedPath = cssPath;
+          if (cssPath.startsWith('./')) {
+            resolvedPath = fileDir ? `${fileDir}/${cssPath.slice(2)}` : cssPath.slice(2);
+          } else if (cssPath.startsWith('../')) {
+            // Handle parent directory imports
+            const pathParts = fileDir.split('/');
+            let cssPathParts = cssPath.split('/');
+            while (cssPathParts[0] === '..') {
+              pathParts.pop();
+              cssPathParts.shift();
+            }
+            resolvedPath = [...pathParts, ...cssPathParts].join('/');
+          } else if (!cssPath.startsWith('/')) {
+            // Relative path without ./ prefix
+            resolvedPath = fileDir ? `${fileDir}/${cssPath}` : cssPath;
+          }
+
+          // Find the CSS file in our map and add its content to imported set
+          const cssContent = cssFilesMap.get(resolvedPath);
+          if (cssContent) {
+            importedCssContents.add(cssContent);
+          }
+        }
+      });
+    });
+
     // Get the main HTML file or create a default one
     let baseHTML =
       htmlFiles[0] ||
@@ -137,8 +295,8 @@ export async function bundleFiles(
 </body>
 </html>`;
 
-    // Combine all CSS
-    const combinedCSS = cssFiles.join("\n\n");
+    // Combine only the CSS files that are actually imported
+    const combinedCSS = Array.from(importedCssContents).join("\n\n");
 
     // Add HMR transition CSS to minimize perceived flicker
     const hmrTransitionCSS = `
@@ -188,8 +346,8 @@ export async function bundleFiles(
       };
     }
 
-    // Create a virtual file system for esbuild
-    const allFiles = [...jsxFiles, ...jsFiles];
+    // allFiles already defined above for dependency graph tracking
+    // const allFiles = [...jsxFiles, ...jsFiles]; // REMOVED - using existing allFiles
 
     // Read package.json FIRST to get installed dependencies
     const packageJsonNode = files["package.json"];
@@ -564,8 +722,9 @@ ${
     }
 
     // 3. Inject CSS (includes HMR transition CSS)
+    // IMPORTANT: Use id="app-styles" so HMR can update the same style tag
     if (fullCSS) {
-      const styleTag = `<style>\n${fullCSS}\n</style>`;
+      const styleTag = `<style id="app-styles">\n${fullCSS}\n</style>`;
       if (finalHTML.includes("</head>")) {
         finalHTML = finalHTML.replace("</head>", `${styleTag}\n</head>`);
       } else {
@@ -597,11 +756,18 @@ ${bundledJS}
       }
     }
 
-    const result: BundleResult = { html: finalHTML };
+    const result: BundleResult = {
+      html: finalHTML,
+      requiresFullReload,
+      fileList: currentFileList,
+      dependencyGraph: currentDependencyGraph,
+    };
 
     // Update cache
     bundleCache = {
       filesHash,
+      fileList: currentFileList,
+      dependencyGraph: currentDependencyGraph,
       result,
     };
 

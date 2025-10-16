@@ -15,6 +15,17 @@ export const Preview: React.FC = () => {
   const [loadingMessage, setLoadingMessage] = useState(
     "Initializing preview..."
   );
+  const [previewError, setPreviewError] = useState<string | null>(null);
+
+  // Double buffering: use two iframe slots and alternate between them
+  const [iframeSlots, setIframeSlots] = useState<{
+    slot1: { key: number; html: string; active: boolean };
+    slot2: { key: number; html: string; active: boolean };
+  }>({
+    slot1: { key: 0, html: "", active: true },
+    slot2: { key: -1, html: "", active: false },
+  });
+
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(
     undefined
   );
@@ -26,6 +37,8 @@ export const Preview: React.FC = () => {
   const filesRef = useRef(files);
   const lastPackagesRef = useRef<string>("");
   const htmlUpdateTimeRef = useRef<number>(0);
+  const activeSlotRef = useRef<"slot1" | "slot2">("slot1");
+  const iframeKeyRef = useRef<number>(0);
 
   // Initialize package ref once
   useEffect(() => {
@@ -65,6 +78,19 @@ export const Preview: React.FC = () => {
       // Hide loading after a short delay to ensure content is rendered
       setTimeout(() => {
         setIsLoading(false);
+
+        // Clean up inactive iframe after active one is ready (double buffering cleanup)
+        setIframeSlots((prev) => {
+          const activeSlot = activeSlotRef.current;
+          const inactiveSlot = activeSlot === "slot1" ? "slot2" : "slot1";
+          console.log(
+            "[Preview] 🧹 Cleaning up inactive iframe after transition"
+          );
+          return {
+            ...prev,
+            [inactiveSlot]: { ...prev[inactiveSlot], html: "" },
+          };
+        });
       }, 100);
     };
 
@@ -90,6 +116,12 @@ export const Preview: React.FC = () => {
           timestamp: Date.now(),
         };
         setConsoleMessages((prev) => [...prev, message]);
+
+        // Show runtime errors in preview as well
+        if (event.data.method === "error") {
+          const errorMsg = event.data.args.join(" ");
+          setPreviewError(`Runtime Error: ${errorMsg}`);
+        }
       }
     };
 
@@ -105,6 +137,10 @@ export const Preview: React.FC = () => {
       const result = await bundleFiles(filesRef.current);
 
       if (result.error) {
+        // Show build error prominently in preview
+        setPreviewError(`Build Error: ${result.error}`);
+        setIsLoading(false);
+
         setConsoleMessages((prev) => [
           ...prev,
           {
@@ -117,34 +153,77 @@ export const Preview: React.FC = () => {
         return;
       }
 
+      // Clear errors on successful build
+      setPreviewError(null);
+
       // Check if packages changed (need iframe recreation for MUI/Emotion cache)
       const currentPackages = JSON.stringify(getInstalledPackages());
       const packagesChanged = currentPackages !== lastPackagesRef.current;
 
+      // Only do FULL reload for first render or package changes
+      // For dependency changes (files added/deleted, imports changed), use instant HMR
       if (isFirstRender.current || packagesChanged) {
+        const wasFirstRender = isFirstRender.current;
         isFirstRender.current = false;
         lastPackagesRef.current = currentPackages;
 
         if (packagesChanged) {
           console.log(
-            "[Preview] Packages changed, full reload required (will fetch from CDN)"
+            "[Preview] 📦 Packages changed, full reload required (will fetch from CDN)"
           );
         } else {
           console.log(
-            "[Preview] Initial load (fetching dependencies from CDN)"
+            "[Preview] 🚀 Initial load (fetching dependencies from CDN)"
           );
         }
 
-        setIsLoading(true);
-        setLoadingMessage("Loading preview...");
-        setIframeKey((prev) => prev + 1);
+        // Only show loading spinner on first render
+        if (wasFirstRender) {
+          setIsLoading(true);
+          setLoadingMessage("Loading preview...");
+        } else {
+          console.log(
+            "[Preview] 💾 Double buffering: switching iframe slots for package change"
+          );
+        }
+
+        // Double buffering: alternate between two iframe slots
+        const currentActive = activeSlotRef.current;
+        const nextActive = currentActive === "slot1" ? "slot2" : "slot1";
+        const nextKey = iframeKeyRef.current + 1;
+
+        iframeKeyRef.current = nextKey;
+        activeSlotRef.current = nextActive;
+
+        setIframeSlots((prev) => ({
+          ...prev,
+          [nextActive]: {
+            key: nextKey,
+            html: result.html,
+            active: true,
+          },
+          [currentActive]: {
+            ...prev[currentActive],
+            active: false,
+          },
+        }));
+
+        setIframeKey(nextKey);
         setHtmlContent(result.html);
         setLastUpdate(Date.now());
       } else {
-        // Hot Module Reload: Send new code AND CSS to iframe (no CDN calls, no flicker)
+        // Hot Module Reload: Send new code AND CSS to iframe (INSTANT - no CDN calls, no iframe reload)
+        // This handles ALL changes: code edits, file add/delete, import changes, etc.
         const iframe = iframeRef.current;
 
-        console.log("[Preview] 🔍 Attempting HMR...", {
+        // Log if this is a dependency change (for debugging)
+        if (result.requiresFullReload) {
+          console.log(
+            "[Preview] ⚡ Dependency change detected (file add/delete/import) - using instant HMR instead of reload"
+          );
+        }
+
+        console.log("[Preview] 🔥 HMR update", {
           iframeExists: !!iframe,
           hasContentWindow: !!iframe?.contentWindow,
           iframeReady: iframeReadyRef.current,
@@ -219,7 +298,9 @@ export const Preview: React.FC = () => {
             );
             setIsLoading(true);
             setLoadingMessage("Reloading preview...");
-            setIframeKey((prev) => prev + 1);
+            const fallbackKey = iframeKeyRef.current + 1;
+            iframeKeyRef.current = fallbackKey;
+            setIframeKey(fallbackKey);
             setHtmlContent(result.html);
             setLastUpdate(Date.now());
           }
@@ -246,7 +327,7 @@ export const Preview: React.FC = () => {
         },
       ]);
     }
-  }, [getInstalledPackages]); // Only depend on getInstalledPackages, use filesRef
+  }, [getInstalledPackages]); // Only depend on getInstalledPackages, use refs for iframe state
 
   // Debounced update on file changes
   useEffect(() => {
@@ -269,8 +350,9 @@ export const Preview: React.FC = () => {
 
   const handleRefresh = () => {
     setConsoleMessages([]);
-    // Force iframe recreation on manual refresh
-    setIframeKey((prev) => prev + 1);
+    setPreviewError(null); // Clear any errors
+    // Force iframe recreation on manual refresh with double buffering
+    isFirstRender.current = true; // Treat as first render to show loading
     updatePreview();
   };
 
@@ -288,7 +370,12 @@ export const Preview: React.FC = () => {
       <div className="flex items-center justify-between px-4 py-2 bg-gray-800 border-b border-gray-700">
         <div className="flex items-center gap-2">
           <span className="text-sm text-gray-300 font-medium">Preview</span>
-          {lastUpdate > 0 && (
+          {previewError && (
+            <span className="text-xs bg-red-600 text-white px-2 py-1 rounded font-medium">
+              Error
+            </span>
+          )}
+          {lastUpdate > 0 && !previewError && (
             <span className="text-xs text-gray-500">
               Updated {new Date(lastUpdate).toLocaleTimeString()}
             </span>
@@ -311,22 +398,84 @@ export const Preview: React.FC = () => {
           isConsoleExpanded ? "flex-1" : "flex-[2]"
         } bg-white overflow-hidden relative`}
       >
+        {/* Iframe Slot 1 */}
         <iframe
-          key={iframeKey}
-          ref={iframeRef}
-          title="preview"
-          srcDoc={htmlContent}
+          key={iframeSlots.slot1.key}
+          ref={iframeSlots.slot1.active ? iframeRef : undefined}
+          title="preview-slot-1"
+          srcDoc={iframeSlots.slot1.html}
           sandbox="allow-scripts allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox"
-          className="w-full h-full border-0"
+          className="w-full h-full border-0 absolute inset-0 transition-opacity duration-200"
+          style={{
+            zIndex: iframeSlots.slot1.active ? 2 : 1,
+            opacity: iframeSlots.slot1.html ? 1 : 0,
+            pointerEvents: iframeSlots.slot1.active ? "auto" : "none",
+          }}
+        />
+
+        {/* Iframe Slot 2 */}
+        <iframe
+          key={iframeSlots.slot2.key}
+          ref={iframeSlots.slot2.active ? iframeRef : undefined}
+          title="preview-slot-2"
+          srcDoc={iframeSlots.slot2.html}
+          sandbox="allow-scripts allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox"
+          className="w-full h-full border-0 absolute inset-0 transition-opacity duration-200"
+          style={{
+            zIndex: iframeSlots.slot2.active ? 2 : 1,
+            opacity: iframeSlots.slot2.html ? 1 : 0,
+            pointerEvents: iframeSlots.slot2.active ? "auto" : "none",
+          }}
         />
 
         {/* Loading Overlay */}
-        {isLoading && (
+        {isLoading && !previewError && (
           <div className="absolute inset-0 bg-white bg-opacity-90 flex items-center justify-center z-10">
             <div className="text-center">
               <div className="inline-block animate-spin rounded-full h-12 w-12 border-4 border-gray-300 border-t-blue-500 mb-4"></div>
               <p className="text-gray-700 font-medium">{loadingMessage}</p>
               <p className="text-gray-500 text-sm mt-1">Please wait...</p>
+            </div>
+          </div>
+        )}
+
+        {/* Error Overlay */}
+        {previewError && (
+          <div className="absolute inset-0 bg-red-50 flex items-center justify-center z-10 p-8">
+            <div className="max-w-2xl w-full">
+              <div className="bg-white rounded-lg shadow-lg border-2 border-red-500 p-6">
+                <div className="flex items-start gap-3">
+                  <div className="flex-shrink-0">
+                    <svg
+                      className="w-6 h-6 text-red-500"
+                      fill="currentColor"
+                      viewBox="0 0 20 20"
+                    >
+                      <path
+                        fillRule="evenodd"
+                        d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
+                        clipRule="evenodd"
+                      />
+                    </svg>
+                  </div>
+                  <div className="flex-1">
+                    <h3 className="text-lg font-semibold text-red-900 mb-2">
+                      Preview Error
+                    </h3>
+                    <div className="bg-red-50 rounded p-4 border border-red-200">
+                      <pre className="text-sm text-red-800 whitespace-pre-wrap font-mono overflow-auto max-h-96">
+                        {previewError}
+                      </pre>
+                    </div>
+                    <button
+                      onClick={() => setPreviewError(null)}
+                      className="mt-4 px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 transition-colors text-sm font-medium"
+                    >
+                      Dismiss Error
+                    </button>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         )}
