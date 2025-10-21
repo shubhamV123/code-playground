@@ -34,8 +34,10 @@ export const Preview: React.FC = () => {
   const getInstalledPackages = useFileSystemStore(
     (s) => s.getInstalledPackages
   );
+  const currentTemplate = useFileSystemStore((s) => s.currentTemplate);
   const filesRef = useRef(files);
   const lastPackagesRef = useRef<string>("");
+  const lastTemplateRef = useRef(currentTemplate);
   const htmlUpdateTimeRef = useRef<number>(0);
   const activeSlotRef = useRef<"slot1" | "slot2">("slot1");
   const iframeKeyRef = useRef<number>(0);
@@ -159,32 +161,42 @@ export const Preview: React.FC = () => {
       // Check if packages changed (need iframe recreation for MUI/Emotion cache)
       const currentPackages = JSON.stringify(getInstalledPackages());
       const packagesChanged = currentPackages !== lastPackagesRef.current;
+      const templateChanged = currentTemplate !== lastTemplateRef.current;
 
       // Only do FULL reload for first render or package changes
       // For dependency changes (files added/deleted, imports changed), use instant HMR
       if (isFirstRender.current || packagesChanged) {
-        const wasFirstRender = isFirstRender.current;
         isFirstRender.current = false;
         lastPackagesRef.current = currentPackages;
+        lastTemplateRef.current = currentTemplate;
 
         if (packagesChanged) {
           console.log(
             "[Preview] 📦 Packages changed, full reload required (will fetch from CDN)"
           );
+          // Show loading overlay when packages change (especially for MUI template)
+          setIsLoading(true);
+
+          // Provide helpful message based on template
+          if (templateChanged) {
+            if (currentTemplate === 'mui') {
+              setLoadingMessage("Loading Material UI template...\nThis may take 10-15 seconds");
+            } else if (currentTemplate === 'react') {
+              setLoadingMessage("Loading React template...");
+            } else if (currentTemplate === 'vanilla') {
+              setLoadingMessage("Loading Vanilla JS template...");
+            } else {
+              setLoadingMessage("Loading template...");
+            }
+          } else {
+            setLoadingMessage("Loading packages from CDN...");
+          }
         } else {
           console.log(
             "[Preview] 🚀 Initial load (fetching dependencies from CDN)"
           );
-        }
-
-        // Only show loading spinner on first render
-        if (wasFirstRender) {
           setIsLoading(true);
           setLoadingMessage("Loading preview...");
-        } else {
-          console.log(
-            "[Preview] 💾 Double buffering: switching iframe slots for package change"
-          );
         }
 
         // Double buffering: alternate between two iframe slots
@@ -430,11 +442,32 @@ export const Preview: React.FC = () => {
 
         {/* Loading Overlay */}
         {isLoading && !previewError && (
-          <div className="absolute inset-0 bg-white bg-opacity-90 flex items-center justify-center z-10">
-            <div className="text-center">
-              <div className="inline-block animate-spin rounded-full h-12 w-12 border-4 border-gray-300 border-t-blue-500 mb-4"></div>
-              <p className="text-gray-700 font-medium">{loadingMessage}</p>
-              <p className="text-gray-500 text-sm mt-1">Please wait...</p>
+          <div className="absolute inset-0 bg-gradient-to-br from-blue-50 to-purple-50 flex items-center justify-center z-10">
+            <div className="text-center max-w-md px-6">
+              {/* Spinner */}
+              <div className="relative inline-block mb-6">
+                <div className="animate-spin rounded-full h-16 w-16 border-4 border-gray-200 border-t-blue-500"></div>
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <div className="h-8 w-8 bg-blue-500 rounded-full animate-pulse"></div>
+                </div>
+              </div>
+
+              {/* Loading Message */}
+              <p className="text-gray-800 font-semibold text-lg mb-2 whitespace-pre-line">
+                {loadingMessage}
+              </p>
+
+              {/* Subtext */}
+              <p className="text-gray-600 text-sm">
+                Fetching dependencies from CDN...
+              </p>
+
+              {/* Progress indicator dots */}
+              <div className="flex justify-center gap-1 mt-4">
+                <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
+                <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
+                <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
+              </div>
             </div>
           </div>
         )}

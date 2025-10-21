@@ -6,12 +6,13 @@ export const muiTemplate: Template = {
   description: "React with Material UI components and theming",
   icon: "🎨",
   packages: {
-    react: "18.3.1",
-    "react-dom": "18.3.1",
-    "@mui/material": "6.3.0",
-    "@emotion/react": "11.13.5",
-    "@emotion/styled": "11.13.5",
+    react: "19.1.1",
+    "react-dom": "19.1.1",
+    "@mui/material": "7.3.4",
+    "@emotion/react": "11.14.0",
+    "@emotion/styled": "11.14.1",
   },
+  defaultActiveFile: "src/App.jsx",
   files: {
     "index.html": {
       type: "file",
@@ -231,11 +232,11 @@ body {
   "version": "1.0.0",
   "type": "module",
   "dependencies": {
-    "react": "18.3.1",
-    "react-dom": "18.3.1",
-    "@mui/material": "6.3.0",
-    "@emotion/react": "11.13.5",
-    "@emotion/styled": "11.13.5"
+    "react": "19.1.1",
+    "react-dom": "19.1.1",
+    "@mui/material": "7.3.4",
+    "@emotion/react": "11.14.0",
+    "@emotion/styled": "11.14.1"
   }
 }`,
     },

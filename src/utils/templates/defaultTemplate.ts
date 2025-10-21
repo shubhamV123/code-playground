@@ -6,9 +6,10 @@ export const defaultTemplate: Template = {
   description: "Plain React application with basic counter example",
   icon: "⚛️",
   packages: {
-    react: "18.3.1",
-    "react-dom": "18.3.1",
+    react: "19.1.1",
+    "react-dom": "19.1.1",
   },
+  defaultActiveFile: "src/App.jsx",
   files: {
     "index.html": {
       type: "file",
@@ -183,8 +184,8 @@ button:active {
   "version": "1.0.0",
   "type": "module",
   "dependencies": {
-    "react": "18.3.1",
-    "react-dom": "18.3.1"
+    "react": "19.1.1",
+    "react-dom": "19.1.1"
   }
 }`,
     },

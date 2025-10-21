@@ -117,7 +117,7 @@ const setNodeAtPath = (
 
 export const useFileSystemStore = create<FileSystemStore>((set, get) => ({
   files: defaultFiles,
-  activeFilePath: "src/App.jsx",
+  activeFilePath: defaultTemplate.defaultActiveFile,
   expandedFolders: new Set(["src"]),
   currentTemplate: defaultTemplate.id,
 
@@ -372,7 +372,7 @@ export const useFileSystemStore = create<FileSystemStore>((set, get) => ({
       set(() => {
         return {
           files: JSON.parse(JSON.stringify(template.files)), // Deep clone
-          activeFilePath: "src/App.jsx",
+          activeFilePath: template.defaultActiveFile,
           expandedFolders: new Set(["src"]),
           currentTemplate: template.id,
         };

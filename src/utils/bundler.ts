@@ -77,17 +77,22 @@ function hashFiles(files: Record<string, FileNode>): string {
  */
 function extractImports(content: string): string[] {
   const imports: string[] = [];
-  const lines = content.split('\n');
+  const lines = content.split("\n");
 
   lines.forEach((line) => {
     // Skip commented lines
     const trimmedLine = line.trim();
-    if (trimmedLine.startsWith('//') || trimmedLine.startsWith('/*') || trimmedLine.startsWith('*')) {
+    if (
+      trimmedLine.startsWith("//") ||
+      trimmedLine.startsWith("/*") ||
+      trimmedLine.startsWith("*")
+    ) {
       return;
     }
 
     // Match import statements: import X from 'Y' or import 'Y'
-    const importRegex = /import\s+(?:(?:[\w*\s{},]*)\s+from\s+)?['"]([^'"]+)['"]/g;
+    const importRegex =
+      /import\s+(?:(?:[\w*\s{},]*)\s+from\s+)?['"]([^'"]+)['"]/g;
     let match;
     while ((match = importRegex.exec(line)) !== null) {
       imports.push(match[1]);
@@ -125,12 +130,17 @@ function dependencyGraphChanged(
   const newFiles = Object.keys(newGraph).sort();
 
   if (oldFiles.length !== newFiles.length) {
-    console.log('[Bundler] 📁 File count changed:', oldFiles.length, '→', newFiles.length);
+    console.log(
+      "[Bundler] 📁 File count changed:",
+      oldFiles.length,
+      "→",
+      newFiles.length
+    );
     return true;
   }
 
   if (oldFiles.some((file, i) => file !== newFiles[i])) {
-    console.log('[Bundler] 📁 File list changed');
+    console.log("[Bundler] 📁 File list changed");
     return true;
   }
 
@@ -140,7 +150,12 @@ function dependencyGraphChanged(
     const newImports = (newGraph[file] || []).sort();
 
     if (oldImports.length !== newImports.length) {
-      console.log(`[Bundler] 📦 Imports changed for ${file}:`, oldImports.length, '→', newImports.length);
+      console.log(
+        `[Bundler] 📦 Imports changed for ${file}:`,
+        oldImports.length,
+        "→",
+        newImports.length
+      );
       return true;
     }
 
@@ -214,13 +229,18 @@ export async function bundleFiles(
     // Build dependency graph for all JS/JSX/TS/TSX files
     const allFiles = [...jsxFiles, ...jsFiles];
     const currentDependencyGraph = buildDependencyGraph(allFiles);
-    const currentFileList = allFiles.map(f => f.name).sort();
+    const currentFileList = allFiles.map((f) => f.name).sort();
 
     // Check if dependencies changed (files added/deleted/imports changed)
     let requiresFullReload = false;
     if (bundleCache) {
-      if (dependencyGraphChanged(bundleCache.dependencyGraph, currentDependencyGraph)) {
-        console.log('[Bundler] 🔄 Dependencies changed - full reload required');
+      if (
+        dependencyGraphChanged(
+          bundleCache.dependencyGraph,
+          currentDependencyGraph
+        )
+      ) {
+        console.log("[Bundler] 🔄 Dependencies changed - full reload required");
         requiresFullReload = true;
       }
     }
@@ -232,12 +252,12 @@ export async function bundleFiles(
     // Scan all JS/JSX files for CSS imports (excluding commented lines)
     jsAndJsxFiles.forEach((file) => {
       // Split content by lines to check for comments
-      const lines = file.content.split('\n');
+      const lines = file.content.split("\n");
 
       lines.forEach((line) => {
         // Skip commented lines (single-line comments)
         const trimmedLine = line.trim();
-        if (trimmedLine.startsWith('//')) {
+        if (trimmedLine.startsWith("//")) {
           return;
         }
 
@@ -249,24 +269,26 @@ export async function bundleFiles(
           const cssPath = match[1];
 
           // Resolve the CSS path relative to the importing file
-          const fileDir = file.name.includes('/')
-            ? file.name.substring(0, file.name.lastIndexOf('/'))
-            : '';
+          const fileDir = file.name.includes("/")
+            ? file.name.substring(0, file.name.lastIndexOf("/"))
+            : "";
 
           // Handle different import patterns: './styles.css', '../styles.css', 'styles.css'
           let resolvedPath = cssPath;
-          if (cssPath.startsWith('./')) {
-            resolvedPath = fileDir ? `${fileDir}/${cssPath.slice(2)}` : cssPath.slice(2);
-          } else if (cssPath.startsWith('../')) {
+          if (cssPath.startsWith("./")) {
+            resolvedPath = fileDir
+              ? `${fileDir}/${cssPath.slice(2)}`
+              : cssPath.slice(2);
+          } else if (cssPath.startsWith("../")) {
             // Handle parent directory imports
-            const pathParts = fileDir.split('/');
-            let cssPathParts = cssPath.split('/');
-            while (cssPathParts[0] === '..') {
+            const pathParts = fileDir.split("/");
+            let cssPathParts = cssPath.split("/");
+            while (cssPathParts[0] === "..") {
               pathParts.pop();
               cssPathParts.shift();
             }
-            resolvedPath = [...pathParts, ...cssPathParts].join('/');
-          } else if (!cssPath.startsWith('/')) {
+            resolvedPath = [...pathParts, ...cssPathParts].join("/");
+          } else if (!cssPath.startsWith("/")) {
             // Relative path without ./ prefix
             resolvedPath = fileDir ? `${fileDir}/${cssPath}` : cssPath;
           }
@@ -611,7 +633,7 @@ ${
   });
 
   // HOT MODULE RELOAD: Listen for new code AND CSS from parent
-  console.log('[Iframe] 🎧 HMR listener installed and ready');
+  // console.log('[Iframe] 🎧 HMR listener installed and ready');
 
   // Store the React root to avoid recreating it
   let reactRoot = null;
@@ -622,18 +644,18 @@ ${
     if (event.data.type === 'hot-module-reload') {
       // Prevent overlapping updates
       if (isUpdating) {
-        console.log('[Iframe] ⏸️ Update already in progress, skipping...');
+        // console.log('[Iframe] ⏸️ Update already in progress, skipping...');
         return;
       }
 
       const revisionId = ++currentModuleRevision;
       isUpdating = true;
 
-      console.log('[Iframe] 📨 Received HMR update:', {
-        revision: revisionId,
-        codeLength: event.data.code?.length,
-        cssLength: event.data.css?.length
-      });
+      // console.log('[Iframe] 📨 Received HMR update:', {
+      //   revision: revisionId,
+      //   codeLength: event.data.code?.length,
+      //   cssLength: event.data.css?.length
+      // });
 
       try {
         const newCode = event.data.code;
@@ -641,7 +663,7 @@ ${
 
         // Update CSS first (before DOM changes to prevent FOUC)
         if (newCSS) {
-          console.log('[Iframe] 🎨 Updating CSS...');
+          // console.log('[Iframe] 🎨 Updating CSS...');
           let styleTag = document.getElementById('app-styles');
           if (!styleTag) {
             styleTag = document.createElement('style');
@@ -651,7 +673,7 @@ ${
           styleTag.textContent = newCSS;
         }
 
-        console.log('[Iframe] 🚀 Executing new module code...');
+        // console.log('[Iframe] 🚀 Executing new module code...');
 
         const root = document.getElementById('root');
         if (!root) {
@@ -679,14 +701,14 @@ ${
           // Append to document head
           document.head.appendChild(script);
 
-          console.log('[Iframe] ✅ HMR update complete - NO NETWORK REQUESTS, NO FLICKER, CSP-SAFE');
+          // console.log('[Iframe] ✅ HMR update complete - NO NETWORK REQUESTS, NO FLICKER, CSP-SAFE');
           isUpdating = false;
 
           // Clean up old React roots if there are duplicates
           setTimeout(() => {
             const rootChildren = root.children;
             if (rootChildren.length > 1) {
-              console.log('[Iframe] 🧹 Cleaning up', rootChildren.length - 1, 'duplicate roots');
+              // console.log('[Iframe] 🧹 Cleaning up', rootChildren.length - 1, 'duplicate roots');
               // Remove all but the last child (newest render)
               while (rootChildren.length > 1) {
                 root.removeChild(rootChildren[0]);

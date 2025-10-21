@@ -1,26 +1,26 @@
 import React, { useEffect, useState } from 'react';
-import CodeMirror from '@uiw/react-codemirror';
-import { javascript } from '@codemirror/lang-javascript';
-import { html } from '@codemirror/lang-html';
-import { css } from '@codemirror/lang-css';
-import { oneDark } from '@codemirror/theme-one-dark';
+import Editor, { type Monaco } from '@monaco-editor/react';
 import { useFileSystemStore } from '../store/fileSystemStore';
+import themeData from 'monaco-themes/themes/Tomorrow-Night.json';
 
-const getLanguageExtension = (fileName: string) => {
+const getLanguage = (fileName: string): string => {
   const ext = fileName.split('.').pop()?.toLowerCase();
 
   switch (ext) {
     case 'js':
     case 'jsx':
+      return 'javascript';
     case 'ts':
     case 'tsx':
-      return [javascript({ jsx: true, typescript: ext === 'ts' || ext === 'tsx' })];
+      return 'typescript';
     case 'html':
-      return [html()];
+      return 'html';
     case 'css':
-      return [css()];
+      return 'css';
+    case 'json':
+      return 'json';
     default:
-      return [];
+      return 'plaintext';
   }
 };
 
@@ -44,6 +44,36 @@ export const CodeEditor: React.FC = () => {
     }
   };
 
+  const handleEditorDidMount = (monaco: Monaco) => {
+    // Define Tomorrow Night theme from monaco-themes
+    monaco.editor.defineTheme('tomorrow-night', themeData as any);
+    monaco.editor.setTheme('tomorrow-night');
+
+    // Configure JavaScript/TypeScript language features for better JSX highlighting
+    monaco.languages.typescript.javascriptDefaults.setDiagnosticsOptions({
+      noSemanticValidation: false,
+      noSyntaxValidation: false,
+    });
+
+    monaco.languages.typescript.typescriptDefaults.setDiagnosticsOptions({
+      noSemanticValidation: false,
+      noSyntaxValidation: false,
+    });
+
+    // Enable JSX in JavaScript
+    monaco.languages.typescript.javascriptDefaults.setCompilerOptions({
+      jsx: monaco.languages.typescript.JsxEmit.React,
+      allowNonTsExtensions: true,
+      allowJs: true,
+    });
+
+    // Enable JSX in TypeScript
+    monaco.languages.typescript.typescriptDefaults.setCompilerOptions({
+      jsx: monaco.languages.typescript.JsxEmit.React,
+      allowNonTsExtensions: true,
+    });
+  };
+
   if (!activeFilePath) {
     return (
       <div className="h-full flex items-center justify-center bg-gray-900 text-gray-400">
@@ -56,7 +86,7 @@ export const CodeEditor: React.FC = () => {
   }
 
   const fileName = activeFilePath.split('/').pop() || '';
-  const extensions = getLanguageExtension(fileName);
+  const language = getLanguage(fileName);
 
   return (
     <div className="h-full flex flex-col bg-gray-900">
@@ -68,35 +98,44 @@ export const CodeEditor: React.FC = () => {
       </div>
 
       <div className="flex-1 overflow-auto">
-        <CodeMirror
-          value={code}
+        <Editor
           height="100%"
-          theme={oneDark}
-          extensions={extensions}
-          onChange={handleChange}
-          basicSetup={{
-            lineNumbers: true,
-            highlightActiveLineGutter: true,
-            highlightSpecialChars: true,
-            foldGutter: true,
-            drawSelection: true,
-            dropCursor: true,
-            allowMultipleSelections: true,
-            indentOnInput: true,
-            bracketMatching: true,
-            closeBrackets: true,
-            autocompletion: true,
-            rectangularSelection: true,
-            crosshairCursor: true,
-            highlightActiveLine: true,
-            highlightSelectionMatches: true,
-            closeBracketsKeymap: true,
-            searchKeymap: true,
-            foldKeymap: true,
-            completionKeymap: true,
-            lintKeymap: true,
+          language={language}
+          value={code}
+          onChange={(value) => handleChange(value || '')}
+          theme="tomorrow-night"
+          beforeMount={handleEditorDidMount}
+          options={{
+            minimap: { enabled: true },
+            fontSize: 14,
+            lineNumbers: 'on',
+            roundedSelection: false,
+            scrollBeyondLastLine: false,
+            readOnly: false,
+            automaticLayout: true,
+            bracketPairColorization: { enabled: true },
+            formatOnPaste: true,
+            formatOnType: true,
+            autoClosingBrackets: 'always',
+            autoClosingQuotes: 'always',
+            suggestOnTriggerCharacters: true,
+            acceptSuggestionOnEnter: 'on',
+            tabCompletion: 'on',
+            wordWrap: 'off',
+            folding: true,
+            foldingStrategy: 'auto',
+            showFoldingControls: 'always',
+            matchBrackets: 'always',
+            autoIndent: 'full',
+            'semanticHighlighting.enabled': true,
+            scrollbar: {
+              vertical: 'visible',
+              horizontal: 'visible',
+              useShadows: false,
+              verticalScrollbarSize: 10,
+              horizontalScrollbarSize: 10,
+            },
           }}
-          className="h-full"
         />
       </div>
     </div>
