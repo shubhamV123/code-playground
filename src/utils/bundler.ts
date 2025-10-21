@@ -44,9 +44,17 @@ export async function initializeBundler() {
   }
 }
 
+function simpleHash(str: string): number {
+  let hash = 5381;
+  for (let i = 0; i < str.length; i++) {
+    hash = (hash * 33) ^ str.charCodeAt(i);
+  }
+  return hash >>> 0; // Convert to unsigned 32-bit integer
+}
+
 /**
  * Generate a hash of file contents for cache comparison
- * OPTIMIZED: Fast hash without joining entire content
+ * FIXED: Now properly detects changes in the middle of files
  */
 function hashFiles(files: Record<string, FileNode>): string {
   let hash = "";
@@ -54,12 +62,9 @@ function hashFiles(files: Record<string, FileNode>): string {
     Object.entries(nodes).forEach(([key, node]) => {
       const nodePath = path ? `${path}/${key}` : key;
       if (node.type === "file" && node.content !== undefined) {
-        // Simple hash: path + content length + first/last 100 chars
-        const content = node.content;
-        const start = content.substring(0, 100);
-        const end =
-          content.length > 100 ? content.substring(content.length - 100) : "";
-        hash += `${nodePath}:${content.length}:${start}:${end}|`;
+        // Use full content hash to properly detect all changes
+        const contentHash = simpleHash(node.content);
+        hash += `${nodePath}:${node.content.length}:${contentHash}|`;
       } else if (node.type === "folder" && node.children) {
         collectContent(node.children, nodePath);
       }

@@ -49,6 +49,9 @@ export function muiResolver(
 
     imports[pkg] = packageUrl;
 
+    // Add subpath mapping with trailing slash to support imports like '@pkg/name/subpath'
+    imports[`${pkg}/`] = `${packageUrl}/`;
+
     // NO wildcards needed - we use named imports from main package
     // e.g., import { Button } from '@mui/material' instead of import Button from '@mui/material/Button'
   });

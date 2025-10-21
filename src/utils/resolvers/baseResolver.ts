@@ -37,12 +37,25 @@ export function baseResolver(
     const version = packageVersions[pkg];
     const versionStr = version?.replace(/^\^/, '') || '';
 
-    // Standard esm.sh URL
-    const packageUrl: string = versionStr
-      ? `https://esm.sh/${pkg}@${versionStr}`
-      : `https://esm.sh/${pkg}`;
+    // Add ?external=react,react-dom to prevent multiple React instances
+    // This ensures all packages use the same React from the import map
+    let packageUrl: string;
+    if (reactVersion && reactDomVersion) {
+      // If React is installed, add external parameter
+      packageUrl = versionStr
+        ? `https://esm.sh/${pkg}@${versionStr}?external=react,react-dom`
+        : `https://esm.sh/${pkg}?external=react,react-dom`;
+    } else {
+      // No React installed, use standard URL
+      packageUrl = versionStr
+        ? `https://esm.sh/${pkg}@${versionStr}`
+        : `https://esm.sh/${pkg}`;
+    }
 
     imports[pkg] = packageUrl;
+
+    // Add subpath mapping with trailing slash to support imports like '@pkg/name/subpath'
+    imports[`${pkg}/`] = `${packageUrl}/`;
   });
 
   return { imports };
