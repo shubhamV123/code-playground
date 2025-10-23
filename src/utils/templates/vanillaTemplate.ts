@@ -4,7 +4,7 @@ export const vanillaTemplate: Template = {
   id: "vanilla",
   name: "Vanilla JS",
   description: "Plain HTML, CSS, and JavaScript - no frameworks",
-  icon: "🍦",
+  icon: "javascript",
   packages: {},
   defaultActiveFile: "src/index.js",
   files: {
@@ -241,16 +241,6 @@ code {
 }`,
         },
       },
-    },
-    "package.json": {
-      type: "file",
-      name: "package.json",
-      content: `{
-  "name": "vanilla-js-playground",
-  "version": "1.0.0",
-  "type": "module",
-  "dependencies": {}
-}`,
     },
   },
 };

@@ -19,6 +19,12 @@ const getLanguage = (fileName: string): string => {
       return 'css';
     case 'json':
       return 'json';
+    case 'vue':
+      // Vue SFC - use HTML for template highlighting
+      return 'html';
+    case 'svelte':
+      // Svelte component - use HTML for template highlighting
+      return 'html';
     default:
       return 'plaintext';
   }

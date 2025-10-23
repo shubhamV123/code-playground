@@ -4,7 +4,7 @@ export const muiTemplate: Template = {
   id: "mui",
   name: "Material UI",
   description: "React with Material UI components and theming",
-  icon: "🎨",
+  icon: "mui",
   packages: {
     react: "19.1.1",
     "react-dom": "19.1.1",

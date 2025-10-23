@@ -1,6 +1,6 @@
 import { type FileNode } from "../../types/fileSystem";
 
-export type TemplateType = "react" | "mui" | "vanilla";
+export type TemplateType = "react" | "mui" | "vanilla" | "vue" | "svelte";
 
 export interface Template {
   id: TemplateType;

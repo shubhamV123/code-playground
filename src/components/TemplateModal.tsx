@@ -1,5 +1,33 @@
 import React from "react";
 import { templates, type Template } from "../utils/templates";
+import { SiJavascript, SiReact, SiMui, SiVuedotjs, SiSvelte } from "react-icons/si";
+
+// Map icon names to React icon components
+const iconMap: Record<string, React.ComponentType<{ className?: string }>> = {
+  javascript: SiJavascript,
+  react: SiReact,
+  mui: SiMui,
+  vue: SiVuedotjs,
+  svelte: SiSvelte,
+};
+
+// Map icon names to their brand colors
+const iconColors: Record<string, string> = {
+  javascript: "#F7DF1E", // JavaScript yellow
+  react: "#61DAFB",      // React blue
+  mui: "#007FFF",        // Material UI blue
+  vue: "#42B883",        // Vue green
+  svelte: "#FF3E00",     // Svelte orange
+};
+
+// Map icon names to their background colors (lighter versions)
+const backgroundColors: Record<string, string> = {
+  javascript: "#FFFBEA", // Light yellow
+  react: "#E6F7FF",      // Light blue
+  mui: "#E3F2FD",        // Light Material UI blue
+  vue: "#E8F5E9",        // Light green
+  svelte: "#FFE9E3",     // Light orange
+};
 
 interface TemplateModalProps {
   isOpen: boolean;
@@ -62,31 +90,57 @@ export const TemplateModal: React.FC<TemplateModalProps> = ({
         {/* Content */}
         <div className="p-6 overflow-y-auto max-h-[60vh]">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {templates.map((template) => (
-              <button
-                key={template.id}
-                onClick={() => handleSelect(template)}
-                className="flex flex-col items-start p-4 border-2 border-gray-200 rounded-lg hover:border-blue-500 hover:shadow-md transition-all text-left group"
-              >
+            {templates.map((template) => {
+              const bgColor = backgroundColors[template.icon] || "#FFFFFF";
+              const borderColor = iconColors[template.icon];
+              return (
+                <button
+                  key={template.id}
+                  onClick={() => handleSelect(template)}
+                  className="flex flex-col items-start p-4 border-2 rounded-lg hover:shadow-lg transition-all text-left group relative overflow-hidden"
+                  style={{
+                    backgroundColor: bgColor,
+                    borderColor: borderColor ? `${borderColor}40` : "#E5E7EB",
+                  }}
+                >
                 <div className="flex items-center gap-3 mb-2">
-                  <span className="text-3xl">{template.icon}</span>
+                  {(() => {
+                    const IconComponent = iconMap[template.icon];
+                    const iconColor = iconColors[template.icon];
+                    return IconComponent ? (
+                      <IconComponent
+                        className="text-3xl transition-all duration-200"
+                        style={{ color: iconColor }}
+                      />
+                    ) : (
+                      <span className="text-3xl">{template.icon}</span>
+                    );
+                  })()}
                   <h3 className="text-lg font-semibold text-gray-900 group-hover:text-blue-600">
                     {template.name}
                   </h3>
                 </div>
-                <p className="text-sm text-gray-600">{template.description}</p>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {Object.keys(template.packages).map((pkg) => (
-                    <span
-                      key={pkg}
-                      className="text-xs px-2 py-1 bg-gray-100 text-gray-700 rounded"
-                    >
-                      {pkg}
-                    </span>
-                  ))}
-                </div>
+                <p className="text-sm text-gray-700">{template.description}</p>
+                {Object.keys(template.packages).length > 0 && (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {Object.keys(template.packages).map((pkg) => (
+                      <span
+                        key={pkg}
+                        className="text-xs px-2 py-1 rounded font-medium"
+                        style={{
+                          backgroundColor: iconColors[template.icon] + "20",
+                          color: iconColors[template.icon],
+                          border: `1px solid ${iconColors[template.icon]}40`,
+                        }}
+                      >
+                        {pkg}
+                      </span>
+                    ))}
+                  </div>
+                )}
               </button>
-            ))}
+            );
+            })}
           </div>
         </div>
 

@@ -4,7 +4,7 @@ export const defaultTemplate: Template = {
   id: "react",
   name: "React",
   description: "Plain React application with basic counter example",
-  icon: "⚛️",
+  icon: "react",
   packages: {
     react: "19.1.1",
     "react-dom": "19.1.1",
