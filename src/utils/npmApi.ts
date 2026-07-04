@@ -1,3 +1,9 @@
+import {
+  getPublicDemoPackage,
+  isOpenNpmEnabled,
+  searchPublicDemoPackages,
+} from "../config/securityPolicy";
+
 export interface NpmPackage {
   name: string;
   version: string;
@@ -30,13 +36,18 @@ export interface NpmSearchResponse {
  * Search NPM registry for packages
  */
 export async function searchNpmPackages(query: string): Promise<NpmSearchResult[]> {
-  if (!query.trim()) {
+  const safeQuery = query.trim().slice(0, 80);
+  if (!safeQuery) {
     return [];
+  }
+
+  if (!isOpenNpmEnabled(import.meta.env)) {
+    return searchPublicDemoPackages(safeQuery);
   }
 
   try {
     const response = await fetch(
-      `https://registry.npmjs.org/-/v1/search?text=${encodeURIComponent(query)}&size=20`
+      `https://registry.npmjs.org/-/v1/search?text=${encodeURIComponent(safeQuery)}&size=20`
     );
 
     if (!response.ok) {
@@ -58,8 +69,28 @@ export async function getPackageInfo(packageName: string): Promise<{
   name: string;
   description: string;
   'dist-tags': { latest: string };
-  versions: Record<string, any>;
+  versions: Record<string, unknown>;
 } | null> {
+  if (!isOpenNpmEnabled(import.meta.env)) {
+    const publicDemoPackage = getPublicDemoPackage(packageName);
+    if (!publicDemoPackage) {
+      return null;
+    }
+
+    return {
+      name: publicDemoPackage.name,
+      description: publicDemoPackage.description,
+      "dist-tags": { latest: publicDemoPackage.version },
+      versions: {
+        [publicDemoPackage.version]: {
+          name: publicDemoPackage.name,
+          version: publicDemoPackage.version,
+          description: publicDemoPackage.description,
+        },
+      },
+    };
+  }
+
   try {
     const response = await fetch(
       `https://registry.npmjs.org/${encodeURIComponent(packageName)}`
@@ -80,6 +111,11 @@ export async function getPackageInfo(packageName: string): Promise<{
  * Get available versions for a package
  */
 export async function getPackageVersions(packageName: string): Promise<string[]> {
+  if (!isOpenNpmEnabled(import.meta.env)) {
+    const publicDemoPackage = getPublicDemoPackage(packageName);
+    return publicDemoPackage ? [publicDemoPackage.version] : [];
+  }
+
   const info = await getPackageInfo(packageName);
   if (!info || !info.versions) {
     return [];

@@ -1,3 +1,12 @@
+import {
+  getPublicDemoPackage,
+  isOpenNpmEnabled,
+  isSafePackageName,
+  normalizeVersion,
+  validatePackageBatch,
+  validatePackageInstall,
+} from "../config/securityPolicy";
+
 /**
  * Dependency Resolver - Automatically resolves and installs peer dependencies
  * Handles complex dependency graphs like Material UI + Emotion
@@ -31,9 +40,31 @@ export async function fetchPackageMetadata(
   packageName: string,
   version?: string
 ): Promise<PackageMetadata | null> {
+  const openNpmEnabled = isOpenNpmEnabled(import.meta.env);
+  const publicDemoPackage = getPublicDemoPackage(packageName);
+  const effectiveVersion = version || (!openNpmEnabled ? publicDemoPackage?.version : "") || "";
+
+  const policyResult =
+    openNpmEnabled && !effectiveVersion
+      ? {
+          ok: isSafePackageName(packageName),
+          reason: `Invalid package name: ${packageName}`,
+        }
+      : validatePackageInstall({
+          packageName,
+          version: effectiveVersion,
+          installedPackages: {},
+          openNpmEnabled,
+        });
+
+  if (!policyResult.ok) {
+    console.warn(policyResult.reason);
+    return null;
+  }
+
   try {
-    const url = version
-      ? `https://registry.npmjs.org/${encodeURIComponent(packageName)}/${version}`
+    const url = effectiveVersion
+      ? `https://registry.npmjs.org/${encodeURIComponent(packageName)}/${encodeURIComponent(effectiveVersion)}`
       : `https://registry.npmjs.org/${encodeURIComponent(packageName)}`;
 
     const response = await fetch(url);
@@ -64,7 +95,7 @@ export async function fetchPackageMetadata(
  * Checks if a version satisfies a semver range (simplified)
  */
 function satisfiesRange(version: string, range: string): boolean {
-  const cleanVersion = version.replace(/^[v\^~]/, '');
+  const cleanVersion = version.replace(/^[v^~]/, '');
 
   // Handle OR ranges (e.g., "^17.0.0 || ^18.0.0 || ^19.0.0")
   if (range.includes('||')) {
@@ -72,7 +103,7 @@ function satisfiesRange(version: string, range: string): boolean {
     return ranges.some(r => satisfiesRange(cleanVersion, r));
   }
 
-  const cleanRange = range.replace(/^[\^~]/, '');
+  const cleanRange = range.replace(/^[~^]/, '');
 
   // Extract version parts
   const [vMajor, vMinor = '0', vPatch = '0'] = cleanVersion.split('.').map(v => parseInt(v));
@@ -118,6 +149,19 @@ export async function resolveDependencies(
     warnings: [],
     errors: [],
   };
+
+  const openNpmEnabled = isOpenNpmEnabled(import.meta.env);
+  const policyResult = validatePackageInstall({
+    packageName,
+    version,
+    installedPackages,
+    openNpmEnabled,
+  });
+
+  if (!policyResult.ok) {
+    result.errors.push(policyResult.reason || `Blocked ${packageName}@${version}`);
+    return result;
+  }
 
   // Prevent infinite recursion
   if (depth > maxDepth) {
@@ -268,6 +312,8 @@ export async function resolveAndPrepareInstallation(
   errors: string[];
   summary: string;
 }> {
+  const openNpmEnabled = isOpenNpmEnabled(import.meta.env);
+
   // Resolve dependencies
   const resolution = await resolveDependencies(
     packageName,
@@ -312,6 +358,26 @@ export async function resolveAndPrepareInstallation(
         'Added react-is to match React version (required by Material UI)'
       );
     }
+  }
+
+  const batchValidation = validatePackageBatch({
+    packages: Object.fromEntries(
+      Object.entries(toInstall).map(([name, version]) => [
+        name,
+        normalizeVersion(version),
+      ])
+    ),
+    installedPackages: currentlyInstalled,
+    openNpmEnabled,
+  });
+
+  if (!batchValidation.ok) {
+    return {
+      toInstall: {},
+      warnings: resolution.warnings,
+      errors: [batchValidation.reason || 'Package install blocked by demo policy'],
+      summary: batchValidation.reason || 'Package install blocked by demo policy',
+    };
   }
 
   // Build summary

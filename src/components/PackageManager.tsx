@@ -16,6 +16,12 @@ import {
 } from "../utils/npmApi";
 import { resolveAndPrepareInstallation } from "../utils/dependencyResolver";
 import { useFileSystemStore } from "../store/fileSystemStore";
+import {
+  DEMO_PACKAGE_LIMIT,
+  isOpenNpmEnabled,
+  PUBLIC_DEMO_NOTICE,
+  validatePackageInstall,
+} from "../config/securityPolicy";
 
 interface PackageManagerProps {
   isExpanded: boolean;
@@ -49,6 +55,7 @@ export const PackageManager: React.FC<PackageManagerProps> = ({
   const { addPackages, removePackage, getInstalledPackages } =
     useFileSystemStore();
   const installedPackages = getInstalledPackages();
+  const openNpmEnabled = isOpenNpmEnabled(import.meta.env);
 
   // Debounced search
   useEffect(() => {
@@ -100,6 +107,24 @@ export const PackageManager: React.FC<PackageManagerProps> = ({
     setInstallationResult(null);
 
     try {
+      const policyResult = validatePackageInstall({
+        packageName,
+        version,
+        installedPackages,
+        openNpmEnabled,
+      });
+
+      if (!policyResult.ok) {
+        setInstallationResult({
+          success: false,
+          message:
+            policyResult.reason ||
+            `Package ${packageName} is blocked in this demo`,
+        });
+        setIsInstalling(false);
+        return;
+      }
+
       // Resolve dependencies including peer dependencies
       const result = await resolveAndPrepareInstallation(
         packageName,
@@ -176,7 +201,7 @@ export const PackageManager: React.FC<PackageManagerProps> = ({
           <VscPackage className="w-4 h-4 text-blue-400" />
           <span className="text-sm font-medium text-gray-300">Dependencies</span>
           <span className="text-xs text-gray-500">
-            ({Object.keys(installedPackages).length})
+            ({Object.keys(installedPackages).length}/{DEMO_PACKAGE_LIMIT})
           </span>
         </div>
       </div>
@@ -221,13 +246,22 @@ export const PackageManager: React.FC<PackageManagerProps> = ({
 
           {/* Search Section */}
           <div className="px-3 py-3 border-b border-gray-700">
+            {!openNpmEnabled && (
+              <div className="mb-3 rounded border border-yellow-700/50 bg-yellow-900/10 p-2 text-[11px] leading-relaxed text-yellow-200">
+                {PUBLIC_DEMO_NOTICE}
+              </div>
+            )}
             <div className="relative">
               <VscSearch className="absolute left-2.5 top-1/2 transform -translate-y-1/2 text-gray-500 w-3.5 h-3.5" />
               <input
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search packages..."
+                placeholder={
+                  openNpmEnabled
+                    ? "Search packages..."
+                    : "Search curated demo packages..."
+                }
                 className="w-full bg-gray-800 text-gray-100 pl-8 pr-3 py-1.5 rounded text-xs border border-gray-600 focus:outline-none focus:border-blue-500 focus:bg-gray-700"
               />
             </div>
@@ -407,7 +441,9 @@ export const PackageManager: React.FC<PackageManagerProps> = ({
 
               {!isSearching && searchResults.length === 0 && (
                 <p className="text-xs text-gray-500 text-center py-6">
-                  No packages found
+                  {openNpmEnabled
+                    ? "No packages found"
+                    : "No curated demo packages found"}
                 </p>
               )}
             </div>

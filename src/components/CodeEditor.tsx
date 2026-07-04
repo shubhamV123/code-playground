@@ -3,6 +3,8 @@ import Editor, { type Monaco } from '@monaco-editor/react';
 import { useFileSystemStore } from '../store/fileSystemStore';
 import themeData from 'monaco-themes/themes/Tomorrow-Night.json';
 
+type MonacoThemeData = Parameters<Monaco["editor"]["defineTheme"]>[1];
+
 const getLanguage = (fileName: string): string => {
   const ext = fileName.split('.').pop()?.toLowerCase();
 
@@ -52,7 +54,7 @@ export const CodeEditor: React.FC = () => {
 
   const handleEditorDidMount = (monaco: Monaco) => {
     // Define Tomorrow Night theme from monaco-themes
-    monaco.editor.defineTheme('tomorrow-night', themeData as any);
+    monaco.editor.defineTheme('tomorrow-night', themeData as MonacoThemeData);
     monaco.editor.setTheme('tomorrow-night');
 
     // Configure JavaScript/TypeScript language features for better JSX highlighting

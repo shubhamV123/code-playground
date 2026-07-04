@@ -296,7 +296,7 @@ export const FileTree: React.FC = () => {
   } | null>(null);
   const [inputValue, setInputValue] = useState("");
 
-  const handleShowContextMenu = (path: string, x: number, _y: number) => {
+  const handleShowContextMenu = (path: string, x: number) => {
     // x=0 means new file, x=1 means new folder
     if (x === 0) {
       setNewItemState({ parentPath: path, type: "file" });

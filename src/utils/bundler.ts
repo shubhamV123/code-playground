@@ -1,5 +1,11 @@
 import * as esbuild from "esbuild-wasm";
 import { type FileNode } from "../types/fileSystem";
+import {
+  getBlockedPublicDemoPackages,
+  isOpenNpmEnabled,
+  PREVIEW_MESSAGE_CHANNEL,
+  PUBLIC_DEMO_NOTICE,
+} from "../config/securityPolicy";
 import { getResolver } from "./resolvers";
 
 export interface BundleResult {
@@ -287,7 +293,7 @@ export async function bundleFiles(
           } else if (cssPath.startsWith("../")) {
             // Handle parent directory imports
             const pathParts = fileDir.split("/");
-            let cssPathParts = cssPath.split("/");
+            const cssPathParts = cssPath.split("/");
             while (cssPathParts[0] === "..") {
               pathParts.pop();
               cssPathParts.shift();
@@ -308,7 +314,7 @@ export async function bundleFiles(
     });
 
     // Get the main HTML file or create a default one
-    let baseHTML =
+    const baseHTML =
       htmlFiles[0] ||
       `<!DOCTYPE html>
 <html lang="en">
@@ -551,6 +557,20 @@ export async function bundleFiles(
       externalPackages.add("react-dom");
     }
 
+    const openNpmEnabled = isOpenNpmEnabled(import.meta.env);
+    const blockedPackages = getBlockedPublicDemoPackages({
+      packageVersions,
+      externalPackages,
+      openNpmEnabled,
+    });
+
+    if (blockedPackages.length > 0) {
+      return {
+        html: baseHTML,
+        error: `Public demo blocked unsupported package${blockedPackages.length === 1 ? "" : "s"}: ${blockedPackages.join(", ")}. ${PUBLIC_DEMO_NOTICE}`,
+      };
+    }
+
     // Use resolver factory to build import map
     // Automatically selects the right resolver based on installed packages
     const resolver = getResolver(packageVersions);
@@ -591,9 +611,12 @@ ${
 </script>`;
 
     // Console interceptor
+    const parentOrigin = window.location.origin;
     const consoleInterceptor = `
 <script>
 (function() {
+  const PARENT_ORIGIN = ${JSON.stringify(parentOrigin)};
+  const MESSAGE_CHANNEL = ${JSON.stringify(PREVIEW_MESSAGE_CHANNEL)};
   const originalConsole = {
     log: console.log,
     error: console.error,
@@ -604,6 +627,7 @@ ${
   ['log', 'error', 'warn', 'info'].forEach(method => {
     console[method] = function(...args) {
       window.parent.postMessage({
+        channel: MESSAGE_CHANNEL,
         type: 'console',
         method: method,
         args: args.map(arg => {
@@ -616,25 +640,27 @@ ${
             return String(arg);
           }
         })
-      }, '*');
+      }, PARENT_ORIGIN);
       originalConsole[method].apply(console, args);
     };
   });
 
   window.addEventListener('error', (event) => {
     window.parent.postMessage({
+      channel: MESSAGE_CHANNEL,
       type: 'console',
       method: 'error',
       args: [event.message + ' at ' + event.filename + ':' + event.lineno]
-    }, '*');
+    }, PARENT_ORIGIN);
   });
 
   window.addEventListener('unhandledrejection', (event) => {
     window.parent.postMessage({
+      channel: MESSAGE_CHANNEL,
       type: 'console',
       method: 'error',
       args: ['Unhandled Promise Rejection: ' + event.reason]
-    }, '*');
+    }, PARENT_ORIGIN);
   });
 
   // HOT MODULE RELOAD: Listen for new code AND CSS from parent
@@ -646,6 +672,15 @@ ${
   let isUpdating = false;
 
   window.addEventListener('message', (event) => {
+    if (
+      event.source !== window.parent ||
+      event.origin !== PARENT_ORIGIN ||
+      event.data?.channel !== MESSAGE_CHANNEL ||
+      event.data?.type !== 'hot-module-reload'
+    ) {
+      return;
+    }
+
     if (event.data.type === 'hot-module-reload') {
       // Prevent overlapping updates
       if (isUpdating) {

@@ -3,6 +3,7 @@ import { VscRefresh } from "react-icons/vsc";
 import { useFileSystemStore } from "../store/fileSystemStore";
 import { bundleFiles } from "../utils/bundler";
 import { Console, type ConsoleMessage } from "./Console";
+import { PREVIEW_MESSAGE_CHANNEL } from "../config/securityPolicy";
 
 export const Preview: React.FC = () => {
   const iframeRef = useRef<HTMLIFrameElement>(null);
@@ -108,6 +109,13 @@ export const Preview: React.FC = () => {
       // For development, we check it's from the same origin or iframe
       if (event.source !== iframeRef.current?.contentWindow) {
         return; // Ignore messages not from our iframe
+      }
+
+      if (
+        event.data?.channel !== PREVIEW_MESSAGE_CHANNEL ||
+        event.data?.type !== "console"
+      ) {
+        return;
       }
 
       if (event.data.type === "console") {
@@ -291,10 +299,14 @@ export const Preview: React.FC = () => {
               // The message handler inside the iframe will process this
               iframe.contentWindow.postMessage(
                 {
+                  channel: PREVIEW_MESSAGE_CHANNEL,
                   type: "hot-module-reload",
                   code: appCode,
                   css: cssContent,
                 },
+                // Sandboxed srcdoc iframes have an opaque origin, so this
+                // message must use "*". The iframe validates our channel and
+                // parent origin before executing an HMR payload.
                 "*"
               );
 
@@ -339,7 +351,7 @@ export const Preview: React.FC = () => {
         },
       ]);
     }
-  }, [getInstalledPackages]); // Only depend on getInstalledPackages, use refs for iframe state
+  }, [currentTemplate, getInstalledPackages]);
 
   // Debounced update on file changes
   useEffect(() => {
@@ -416,7 +428,7 @@ export const Preview: React.FC = () => {
           ref={iframeSlots.slot1.active ? iframeRef : undefined}
           title="preview-slot-1"
           srcDoc={iframeSlots.slot1.html}
-          sandbox="allow-scripts allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox"
+          sandbox="allow-scripts allow-modals"
           className="w-full h-full border-0 absolute inset-0 transition-opacity duration-200"
           style={{
             zIndex: iframeSlots.slot1.active ? 2 : 1,
@@ -431,7 +443,7 @@ export const Preview: React.FC = () => {
           ref={iframeSlots.slot2.active ? iframeRef : undefined}
           title="preview-slot-2"
           srcDoc={iframeSlots.slot2.html}
-          sandbox="allow-scripts allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox"
+          sandbox="allow-scripts allow-modals"
           className="w-full h-full border-0 absolute inset-0 transition-opacity duration-200"
           style={{
             zIndex: iframeSlots.slot2.active ? 2 : 1,

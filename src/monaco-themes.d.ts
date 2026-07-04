@@ -1,4 +1,4 @@
 declare module 'monaco-themes/themes/*.json' {
-  const content: any;
+  const content: Record<string, unknown>;
   export default content;
 }

@@ -39,7 +39,8 @@ A full-featured browser-based code playground for React applications, built with
 
 ### 📦 Package Management
 
-- **NPM Package Search**: Search and install packages from npm registry
+- **Restricted Public Demo Mode**: Public deployments only expose a curated dependency list
+- **Local Open NPM Mode**: Clone the repo and enable `VITE_ENABLE_OPEN_NPM=true` to search and install arbitrary npm packages locally
 - **Smart Dependency Resolution**: Automatic peer dependency detection
 - **Version Selection**: Choose specific package versions
 - **Visual Dependencies Panel**: See installed packages with versions
@@ -109,11 +110,33 @@ npm install
 # Start development server
 npm run dev
 
+# Enable full npm search/install for local experiments
+echo "VITE_ENABLE_OPEN_NPM=true" > .env.local
+npm run dev
+
 # Build for production
 npm run build
 ```
 
 The application will be available at `http://localhost:5173`
+
+## 🔒 Public Demo Safety
+
+The hosted demo is intentionally restricted. It is meant to show the artifact runtime, editor, templates, browser bundling, and sandboxed preview without letting the public subdomain become a general-purpose npm execution surface.
+
+By default, the public app:
+
+- Searches only a curated package list used by the built-in demos.
+- Blocks non-curated package names even if someone edits `package.json` manually.
+- Caps dependency count and install batch size.
+- Runs previews in a sandboxed iframe without same-origin, form submission, or popup escape permissions.
+- Ships Netlify/Vercel security headers, including CSP, frame blocking, MIME sniffing protection, referrer policy, and restricted browser permissions.
+
+For unrestricted package experiments, clone the repo and set:
+
+```bash
+VITE_ENABLE_OPEN_NPM=true
+```
 
 ## 📂 Project Structure
 
