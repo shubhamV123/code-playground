@@ -1,9 +1,10 @@
 import React from "react";
 import { templates, type Template } from "../utils/templates";
+import type { IconType } from "react-icons";
 import { SiJavascript, SiReact, SiMui, SiVuedotjs, SiSvelte } from "react-icons/si";
 
 // Map icon names to React icon components
-const iconMap: Record<string, React.ComponentType<{ className?: string }>> = {
+const iconMap: Record<string, IconType> = {
   javascript: SiJavascript,
   react: SiReact,
   mui: SiMui,
